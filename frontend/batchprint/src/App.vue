@@ -22,12 +22,20 @@
           accept=".xlsx, .xls"
           prepend-icon="mdi-file-excel"
           label="File input"
+          @change="handleExcelChange"
         ></v-file-input>
         <v-divider class="mt-1"></v-divider>
-
-
-
-
+        <div class="mt-3">
+          <v-chip
+            v-for="header in headers"
+            :key="header"
+            class="ma-1"
+            color="primary"
+            label
+          >
+            {{ header }}
+          </v-chip>
+        </div>
       </v-list>
     </v-navigation-drawer>
 
@@ -45,9 +53,11 @@
 
 <script setup lang="ts">
 import { ref } from 'vue';
+import axios from 'axios';
 
 // 用于存储选择的PDF文件
 const pdfSrc = ref<string>('');
+const headers = ref<string[]>([]);
 
 const handleFileChange = async (event: Event) => {
   const fileInput = event.target as HTMLInputElement;
@@ -61,6 +71,20 @@ const handleFileChange = async (event: Event) => {
     alert('请选择有效的PDF文件');
   }
 };
+
+const handleExcelChange = async (event: Event) => {
+  const fileInput = event.target as HTMLInputElement
+  const file = fileInput.files ? fileInput.files[0] : null
+
+  if (file && (file.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || file.type === 'application/vnd.ms-excel')) {
+    const formData = new FormData()
+    formData.append('file', file)
+    const res = await axios.post('http://localhost:8000/get_excel_headers', formData)
+    headers.value = res.data.headers
+  } else {
+    alert('请选择有效的Excel文件')
+  }
+}
 </script>
 
 <style scoped>
