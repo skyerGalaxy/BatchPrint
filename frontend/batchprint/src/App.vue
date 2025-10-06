@@ -2,7 +2,10 @@
   <v-layout class="rounded rounded-md border">
     <v-app-bar title="AutoFiller"></v-app-bar>
 
-    <v-navigation-drawer>
+    <v-navigation-drawer
+      width="25%"
+      style ="min-width: 220px; max-width: 300px"
+    >
       <v-list nav>
         <div class="mt-15">模板</div>
         <v-file-input
@@ -27,6 +30,7 @@
             :key="header"
             class="ma-1"
             color="primary"
+            :draggable="true"
             label
           >
             {{ header }}
@@ -35,7 +39,7 @@
       </v-list>
     </v-navigation-drawer>
 
-    <v-main class="d-flex align-center justify-center" style="height: 100vh;">
+    <v-main class="d-flex align-center justify-center" style="flex:1;height: 100vh;">
       <PdfViewer :pdfSrc="pdfSrc" />
     </v-main>
   </v-layout>
@@ -44,6 +48,7 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import axios from 'axios';
+import PdfViewer from './components/pdfview/PdfViewer.vue';
 
 const pdfSrc = ref<string>('');
 const headers = ref<string[]>([]);

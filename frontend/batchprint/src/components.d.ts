@@ -10,7 +10,8 @@ declare module 'vue' {
   export interface GlobalComponents {
     AppFooter: typeof import('./components/AppFooter.vue')['default']
     HelloWorld: typeof import('./components/HelloWorld.vue')['default']
-    PdfViewer: typeof import('./components/PdfViewer.vue')['default']
+    LocationDialog: typeof import('./components/pdfview/LocationDialog.vue')['default']
+    PdfViewer: typeof import('./components/pdfview/PdfViewer.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
   }
