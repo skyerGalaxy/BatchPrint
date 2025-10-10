@@ -13,27 +13,29 @@
 
   const tab = ref(1);
 
-  const activeNav = ref("overview");
+  const activeNav = ref("signature");
   const navItems = [
-  { title: "概览", value: "overview" },
-  { title: "设置", value: "settings" },
-  { title: "帮助", value: "help" },
+  { title: "签字", value: "signature" },
+  { title: "印章", value: "seal" },
+  { title:"表格", value:"table" }
 ];
 </script>
 
 <template>
   <v-dialog v-model="props.dialog" max-width="500">
-      <v-card style="height: 70vh;display: flex; flex-direction: column;">
-        <v-tabs
-          v-model="tab"
-          fixed-tabs
-          grow
-          color="primary"
-          bg-color="blue-lighten-5"
-        >
-          <v-tab value="1" active-color="#2a72c5">单一选项</v-tab>
-          <v-tab value="2" active-color="#2a72c5">条件选项</v-tab>
-        </v-tabs>
+      <v-card style="height: 40vh;min-height: 40vh;max-height: 40vh; display: flex; flex-direction: column;">
+        <v-card-item>
+          <v-tabs
+            v-model="tab"
+            fixed-tabs
+            grow
+            color="primary"
+            bg-color="blue-lighten-5"
+          >
+            <v-tab value="1" active-color="#2a72c5">单一选项</v-tab>
+            <v-tab value="2" active-color="#2a72c5">条件选项</v-tab>
+          </v-tabs>
+        </v-card-item>
 
         <v-card-text style="flex: 1; overflow-y: auto; ">
           <v-tabs-window v-model="tab">
@@ -54,19 +56,19 @@
 
                 <!-- 右侧内容展示 -->
                 <v-col cols="9">
-                  <div v-if="activeNav === 'overview'">
-                    <h3>概览内容</h3>
-                    <p>这里是“概览”的详细信息。</p>
+                  <div v-if="activeNav === 'signature'">
+                    <h3>签字</h3>
+                    <p>这里是“签字”的详细信息。</p>
                   </div>
 
-                  <div v-else-if="activeNav === 'settings'">
-                    <h3>设置内容</h3>
-                    <p>这里是“设置”的具体内容。</p>
+                  <div v-else-if="activeNav === 'seal'">
+                    <h3>印章</h3>
+                    <p>这里是“印章”的详细信息。</p>
                   </div>
 
-                  <div v-else-if="activeNav === 'help'">
-                    <h3>帮助内容</h3>
-                    <p>这里是“帮助”的说明。</p>
+                  <div v-else-if="activeNav === 'table'">
+                    <h3>表格</h3>
+                    <p>这里是“表格”的详细信息。</p>
                   </div>
                 </v-col>
               </v-row>
