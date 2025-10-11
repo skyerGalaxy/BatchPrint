@@ -2,9 +2,7 @@ import { defineStore } from "pinia";
 
 
 export const useBPStore = defineStore("bpstore", () => {
-  const pdfPath = ref<string | null>(null);
-  const pdfName = ref<string | null>(null);
+  const fieldNames = ref<string[]>([]);
 
-
-  return { pdfPath, pdfName };
+  return { fieldNames };
 });

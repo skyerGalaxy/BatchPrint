@@ -24,18 +24,18 @@
           @change="handleExcelChange"
         ></v-file-input>
         <v-divider class="mt-1"></v-divider>
-        <div class="mt-3">
+        <!-- <div class="mt-3">
           <v-chip
-            v-for="header in headers"
-            :key="header"
+            v-for="fieldName in useBPStoreInstance.fieldNames"
+            :key="fieldName"
             class="ma-1"
             color="primary"
             :draggable="true"
             label
           >
-            {{ header }}
+            {{ fieldName }}
           </v-chip>
-        </div>
+        </div> -->
       </v-list>
     </v-navigation-drawer>
 
@@ -47,11 +47,12 @@
 
 <script setup lang="ts">
 import { ref } from 'vue';
+import { useBPStore } from './stores/bpstore';
 import axios from 'axios';
 import PdfViewer from './components/pdfview/PdfViewer.vue';
 
 const pdfSrc = ref<string>('');
-const headers = ref<string[]>([]);
+const useBPStoreInstance = useBPStore();
 
 const handleFileChange = async (event: Event) => {
   const fileInput = event.target as HTMLInputElement;
@@ -73,7 +74,8 @@ const handleExcelChange = async (event: Event) => {
     const formData = new FormData()
     formData.append('file', file)
     const res = await axios.post('http://localhost:8000/get_excel_headers', formData)
-    headers.value = res.data.headers
+    useBPStoreInstance.fieldNames = res.data.headers
+    console.log('Excel file loaded:', useBPStoreInstance.fieldNames)
   } else {
     alert('请选择有效的Excel文件')
   }
