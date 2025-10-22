@@ -25,6 +25,32 @@
   const bpStore = useBPStore();
 
   const selectedField = ref<string | null>(bpStore.fieldNames.length > 0 ? bpStore.fieldNames[0] : null);
+
+
+  const step = ref(1);
+
+  // ---------- 新增：条件行状态与方法 ----------
+type Condition = { id: number; field: string | null; op: string; value: string };
+
+const ops = ['等于','不等于','包含','不包含','为空','不为空'];
+
+const conditions = ref<Condition[]>([
+  { id: Date.now(), field: bpStore.fieldNames[0] ?? null, op: '等于', value: '' }
+]);
+
+function addCondition() {
+  conditions.value.push({
+    id: Date.now() + Math.floor(Math.random() * 1000),
+    field: bpStore.fieldNames[0] ?? null,
+    op: '等于',
+    value: ''
+  });
+  nextTick(() => {});
+}
+
+function removeCondition(index: number) {
+  conditions.value.splice(index, 1);
+}
 </script>
 
 <template>
@@ -113,14 +139,95 @@
             </v-tabs-window-item>
 
             <v-tabs-window-item value="2">
-              Two
+              <v-window v-model="step">
+                <v-window-item :value="1">
+                  <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+                    <div style="font-size:14px;">查找条件</div>
+                    <v-spacer></v-spacer>
+                    <div style="display:flex; align-items:center; gap:8px;">
+                      <div style="font-size:13px;">符合以下</div>
+                      <v-select
+                        :items="['所有','任一']"
+                        model-value="所有"
+                        dense
+                        style="width:100px"
+                      />
+                    </div>
+                  </div>
+
+                  <!-- 条件列表 -->
+                  <div style="display:flex; flex-direction:column; gap:8px; max-height: calc(40vh - 140px); overflow:auto; padding-right:8px;">
+                    <div
+                      v-for="(cond, idx) in conditions"
+                      :key="cond.id"
+                      style="display:flex; align-items:center; gap:8px;"
+                    >
+                      <v-select
+                        :items="bpStore.fieldNames"
+                        v-model="cond.field"
+                        dense
+                        style="width:200px"
+                        :placeholder="'请选择字段'"
+                      />
+                      <v-select
+                        :items="ops"
+                        v-model="cond.op"
+                        dense
+                        style="width:120px"
+                      />
+                      <v-text-field
+                        v-model="cond.value"
+                        dense
+                        placeholder="值"
+                        style="flex:1; min-width:120px;"
+                      />
+                      <v-btn icon variant="flat" color="error" @click="removeCondition(idx)" :title="'删除条件'">
+                        <v-icon>mdi-close</v-icon>
+                      </v-btn>
+                    </div>
+
+                    <!-- 添加条件 -->
+                    <div>
+                      <v-btn text small color="primary" @click="addCondition">
+                        <v-icon left>mdi-plus</v-icon> 添加条件
+                      </v-btn>
+                    </div>
+                  </div>
+                </v-window-item>
+                <v-window-item :value="2">
+                  <div>条件选项 - 步骤 2 内容</div>
+                </v-window-item>
+              </v-window>
             </v-tabs-window-item>
+            
           </v-tabs-window>
         </v-card-text>
-        <v-card-actions>
+
+        <v-card-actions v-if="tab==1">
           <v-spacer></v-spacer>
           <v-btn color="primary" text @click="emits('update:dialog',false)">Disagree</v-btn>
           <v-btn color="primary" text @click="emits('update:dialog',false)">Agree</v-btn>
+        </v-card-actions>
+        <v-card-actions v-if="tab==2&&step==1">
+            <v-spacer></v-spacer>
+            <v-btn
+              color="primary"
+              variant="flat"
+              @click="step++"
+            >
+              下一步
+            </v-btn>
+        </v-card-actions>
+        <v-card-actions v-if="tab==2&&step==2">
+            <v-btn
+              variant="flat"
+              @click="step--"
+            >
+              上一步
+            </v-btn>
+            <v-spacer></v-spacer>
+            <v-btn color="primary" text @click="emits('update:dialog',false)">Disagree</v-btn>
+            <v-btn color="primary" text @click="emits('update:dialog',false)">Agree</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
