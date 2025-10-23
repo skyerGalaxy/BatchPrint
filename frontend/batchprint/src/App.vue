@@ -24,7 +24,7 @@
           @change="handleExcelChange"
         ></v-file-input>
         <v-divider class="mt-1"></v-divider>
-        <!-- <div class="mt-3">
+        <div class="mt-3">
           <v-chip
             v-for="fieldName in useBPStoreInstance.fieldNames"
             :key="fieldName"
@@ -35,7 +35,7 @@
           >
             {{ fieldName }}
           </v-chip>
-        </div> -->
+        </div>
       </v-list>
     </v-navigation-drawer>
 

@@ -30,6 +30,9 @@
   const step = ref(1);
 
   // ---------- 新增：条件行状态与方法 ----------
+
+const matchMode = ref('所有'); // '所有' 或 '任一'
+
 type Condition = { id: number; field: string | null; op: string; value: string };
 
 const ops = ['等于','不等于','包含','不包含','为空','不为空'];
@@ -141,16 +144,17 @@ function removeCondition(index: number) {
             <v-tabs-window-item value="2">
               <v-window v-model="step">
                 <v-window-item :value="1">
-                  <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
-                    <div style="font-size:14px;">查找条件</div>
+                  <div style="display:flex; align-items:center; margin-bottom:8px; height:20px; min-height:32px; padding:4px 0;">
+                    <div style="font-size:13px; line-height:1;">查找条件</div>
                     <v-spacer></v-spacer>
                     <div style="display:flex; align-items:center; gap:8px;">
-                      <div style="font-size:13px;">符合以下</div>
+                      <div style="font-size:12px; line-height:1;">符合以下</div>
                       <v-select
                         :items="['所有','任一']"
-                        model-value="所有"
-                        dense
-                        style="width:100px"
+                        v-model="matchMode"
+                        density="compact"
+                        style="min-width:80px; height:30px; line-height:30px;"
+                        hide-details
                       />
                     </div>
                   </div>
@@ -185,13 +189,6 @@ function removeCondition(index: number) {
                         <v-icon>mdi-close</v-icon>
                       </v-btn>
                     </div>
-
-                    <!-- 添加条件 -->
-                    <div>
-                      <v-btn text small color="primary" @click="addCondition">
-                        <v-icon left>mdi-plus</v-icon> 添加条件
-                      </v-btn>
-                    </div>
                   </div>
                 </v-window-item>
                 <v-window-item :value="2">
@@ -209,6 +206,10 @@ function removeCondition(index: number) {
           <v-btn color="primary" text @click="emits('update:dialog',false)">Agree</v-btn>
         </v-card-actions>
         <v-card-actions v-if="tab==2&&step==1">
+          <!-- 添加条件 -->
+            <v-btn text small color="primary" @click="addCondition">
+              <v-icon left>mdi-plus</v-icon> 添加条件
+            </v-btn>
             <v-spacer></v-spacer>
             <v-btn
               color="primary"
