@@ -38,13 +38,13 @@ type Condition = { id: number; field: string | null; op: string; value: string }
 const ops = ['等于','不等于','包含','不包含','为空','不为空'];
 
 const conditions = ref<Condition[]>([
-  { id: Date.now(), field: bpStore.fieldNames[0] ?? null, op: '等于', value: '' }
+  { id: Date.now(), field: null, op: '等于', value: '' }
 ]);
 
 function addCondition() {
   conditions.value.push({
     id: Date.now() + Math.floor(Math.random() * 1000),
-    field: bpStore.fieldNames[0] ?? null,
+    field: null,
     op: '等于',
     value: ''
   });
@@ -167,7 +167,7 @@ function removeCondition(index: number) {
                       style="display:flex; align-items:center; gap:8px;"
                     >
                       <v-select
-                        :items="bpStore.fieldNames"
+                        :items="bpStore.fieldNames.filter(f => !conditions.some(c => c.field === f))"
                         v-model="cond.field"
                         dense
                         style="width:200px"
@@ -183,6 +183,7 @@ function removeCondition(index: number) {
                         v-model="cond.value"
                         dense
                         placeholder="值"
+                        :disabled="cond.op === '为空' || cond.op === '不为空'"
                         style="flex:1; min-width:120px;"
                       />
                       <v-btn icon variant="flat" color="error" @click="removeCondition(idx)" :title="'删除条件'">
@@ -214,7 +215,7 @@ function removeCondition(index: number) {
             <v-btn
               color="primary"
               variant="flat"
-              @click="step++"
+              @click="step++; console.log(conditions)"
             >
               下一步
             </v-btn>
