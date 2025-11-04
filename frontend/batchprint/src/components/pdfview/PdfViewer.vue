@@ -6,7 +6,7 @@
       :key="pageIndex"
       class="pdf-page"
       style="cursor: crosshair;"
-      @click="dialog = !dialog"
+      @click="onCanvasClick($event, pageIndex)"
     />
   </div>
   <LocationDialog v-model:dialog="dialog" />
@@ -17,6 +17,8 @@ import * as PDFJS from "pdfjs-dist";
 import { ref, onMounted, watch, nextTick } from "vue";
 
 import LocationDialog from "./LocationDialog.vue";
+
+import { useBPStore } from "@/stores/bpstore";
 
 PDFJS.GlobalWorkerOptions.workerSrc = new URL(
     "pdfjs-dist/build/pdf.worker.mjs",
@@ -38,6 +40,9 @@ const pdfScale = ref(2); // 控制清晰度
 const pdfContainerRef = ref<HTMLElement | null>(null);
 
 const dialog = ref(false);
+
+const bpStore = useBPStore();
+
 
 // 加载 PDF 文件
 const loadFile = (url: string) => {
@@ -90,6 +95,29 @@ const renderPage = (num: number) => {
     }
   });
 };
+
+// 点击时计算 canvas 内的绘制坐标（考虑了样式缩放）
+function onCanvasClick(e: MouseEvent, pageIndex: number) {
+  const canvas = document.getElementById(`pdf-canvas-${pageIndex}`) as HTMLCanvasElement | null;
+  if (!canvas) return;
+
+  const rect = canvas.getBoundingClientRect();
+  const clientX = e.clientX;
+  const clientY = e.clientY;
+
+  // 将屏幕坐标转换为 canvas 绘制坐标（与 canvas.width / canvas.height 对应）
+  const x = (clientX - rect.left) * (canvas.width / rect.width);
+  const y = (clientY - rect.top) * (canvas.height / rect.height);
+
+  // 归一化坐标（0..1）
+  const nx = (clientX - rect.left) / rect.width;
+  const ny = (clientY - rect.top) / rect.height;
+
+  bpStore.setPointer(pageIndex, x, y);
+
+  // 保留原来的行为：切换对话框显示
+  dialog.value = !dialog.value;
+}
 
 // 初始化
 onMounted(() => {

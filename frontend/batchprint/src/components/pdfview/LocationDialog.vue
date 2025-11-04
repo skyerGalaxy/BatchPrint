@@ -1,8 +1,9 @@
-// ...existing code...
 <script setup lang="ts">
 
   import { defineProps,defineEmits,ref } from "vue";
   import { useBPStore } from "@/stores/bpstore";
+
+  import MaterialPanel from "./MaterialPanel.vue";
 
   const props = defineProps({
     dialog: {
@@ -14,13 +15,6 @@
   const emits = defineEmits(['update:dialog']);
 
   const tab = ref(1);
-
-  const activeNav = ref("table");
-  const navItems = [
-  { title:"表格", value:"table" },
-  { title: "签字", value: "signature" },
-  { title: "印章", value: "seal" },
-];
 
   const bpStore = useBPStore();
 
@@ -77,83 +71,23 @@ function removeCondition(index: number) {
         <v-card-text style="flex: 1; overflow: hidden; padding: 0 12px;">
           <v-tabs-window v-model="tab" style="height: 100%;">
             <v-tabs-window-item value="1" style="height: 100%;">
-              <!-- 横向布局：左侧固定，右侧可滚动 -->
-              <v-row style="height: 100%; margin: 0;">
-                <!-- 左侧导航栏（固定，不随右侧内容滚动） -->
-                <v-col cols="3" class="nav-col" style="padding-top: 12px; padding-bottom: 12px;">
-                  <v-list density="compact" nav>
-                    <v-list-item
-                      v-for="item in navItems"
-                      :key="item.value"
-                      :title="item.title"
-                      :active="activeNav === item.value"
-                      @click="activeNav = item.value"
-                    ></v-list-item>
-                  </v-list>
-                </v-col>
-
-                <!-- 右侧内容展示（超出时内部滚动） -->
-                <v-col cols="9" style="overflow: auto; max-height: 100%;">
-                    <div v-if="activeNav === 'table'">
-                    <v-radio-group v-model="selectedField" column>
-                      <v-virtual-scroll
-                      :items="bpStore.fieldNames"
-                      :height="300"
-                      item-height="40"
-                      >
-                      <template #default="{ item }">
-                        <v-radio
-                        :key="item"
-                        :label="item"
-                        :value="item"
-                        ></v-radio>
-                      </template>
-                      </v-virtual-scroll>
-                    </v-radio-group>
-                    </div>
-
-                    <div v-else-if="activeNav === 'signature'">
-                    <h3>签字</h3>
-                    <v-virtual-scroll
-                      :items="Array.from({length: 20}, (_, i) => i + 1)"
-                      :height="300"
-                      item-height="24"
-                    >
-                      <template #default="{ item }">
-                      <p :key="item">示例占位内容行 {{ item }}</p>
-                      </template>
-                    </v-virtual-scroll>
-                    </div>
-
-                    <div v-else-if="activeNav === 'seal'">
-                    <h3>印章</h3>
-                    <v-virtual-scroll
-                      :items="Array.from({length: 2}, (_, i) => i + 1)"
-                      :height="300"
-                      item-height="24"
-                    >
-                      <template #default="{ item }">
-                      <p :key="item">示例占位内容行 {{ item }}</p>
-                      </template>
-                    </v-virtual-scroll>
-                    </div>
-                </v-col>
-              </v-row>
+              <material-panel v-model:selected-field="selectedField"/>
             </v-tabs-window-item>
 
             <v-tabs-window-item value="2">
               <v-window v-model="step">
                 <v-window-item :value="1">
-                  <div style="display:flex; align-items:center; margin-bottom:8px; height:20px; min-height:32px; padding:4px 0;">
-                    <div style="font-size:13px; line-height:1;">查找条件</div>
+                  <div style="display:flex; align-items:center; margin-bottom:8px; height:32px; min-height:32px; padding:4px 0;">
+                    <div style="font-size:13px; line-height:32px;">查找条件</div>
                     <v-spacer></v-spacer>
                     <div style="display:flex; align-items:center; gap:8px;">
-                      <div style="font-size:12px; line-height:1;">符合以下</div>
+                      <div style="font-size:13px; line-height:32px;">符合以下</div>
                       <v-select
                         :items="['所有','任一']"
                         v-model="matchMode"
-                        density="compact"
-                        style="min-width:80px; height:30px; line-height:30px;"
+                        dense
+                        outlined
+                        height="10"
                         hide-details
                       />
                     </div>
@@ -192,7 +126,7 @@ function removeCondition(index: number) {
                   </div>
                 </v-window-item>
                 <v-window-item :value="2">
-                  <div>条件选项 - 步骤 2 内容</div>
+                  <material-panel v-model:selected-field="selectedField"/>
                 </v-window-item>
               </v-window>
             </v-tabs-window-item>
@@ -242,6 +176,13 @@ function removeCondition(index: number) {
   display: flex;
   flex-direction: column;
   height: 100%;
+}
+
+.v-text-field--box .v-input__slot,
+.v-text-field--outline .v-input__slot {
+  min-height: auto!important;
+  display: flex!important;
+  align-items: center!important;
 }
 
 </style>

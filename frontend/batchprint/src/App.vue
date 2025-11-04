@@ -1,6 +1,8 @@
 <template>
   <v-layout class="rounded rounded-md border">
-    <v-app-bar title="AutoFiller"></v-app-bar>
+    <v-app-bar title="AutoFiller">
+      
+    </v-app-bar>
 
     <v-navigation-drawer
       width="25%"
