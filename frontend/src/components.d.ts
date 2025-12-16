@@ -15,5 +15,6 @@ declare module 'vue' {
     PdfViewer: typeof import('./components/pdfview/PdfViewer.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
+    SettingsDialog: typeof import('./components/global/SettingsDialog.vue')['default']
   }
 }

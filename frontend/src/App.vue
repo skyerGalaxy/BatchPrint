@@ -1,7 +1,37 @@
 <template>
   <v-layout class="rounded rounded-md border">
     <v-app-bar title="AutoFiller">
-      
+      <template v-slot:append>
+        <v-menu
+          :offset-y="true"
+          :close-on-content-click="true"
+          :nudge-bottom="10"
+        >
+          <template v-slot:activator="{ props }">
+            <v-btn 
+              v-bind="props"
+              icon
+              color="primary"
+            >
+              <v-icon>mdi-account</v-icon>
+            </v-btn>
+          </template>
+          <v-card min-width="200">
+            <v-list-item>
+              <v-list-item-title>Profile</v-list-item-title>
+            </v-list-item>
+            <v-divider></v-divider>
+            <v-list density="compact">
+              <v-list-item>
+                <v-list-item-title>Settings</v-list-item-title>
+              </v-list-item>
+              <v-list-item>
+                <v-list-item-title>Logout</v-list-item-title>
+              </v-list-item>
+            </v-list>
+          </v-card>
+        </v-menu>
+      </template>
     </v-app-bar>
 
     <v-navigation-drawer
@@ -52,6 +82,7 @@ import { ref } from 'vue';
 import { useBPStore } from './stores/bpstore';
 import axios from 'axios';
 import PdfViewer from './components/pdfview/PdfViewer.vue';
+import { tr } from 'vuetify/locale';
 
 const pdfSrc = ref<string>('');
 const useBPStoreInstance = useBPStore();
