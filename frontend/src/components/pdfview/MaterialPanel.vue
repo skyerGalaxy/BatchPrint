@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
-import { defineProps, defineEmits } from 'vue';
 import { useBPStore } from '@/stores/bpstore';
 import type { PropType } from 'vue';
 
@@ -30,7 +29,7 @@ const localSelected = computed<string | null>({
 
 <template>
   <v-row style="height: 100%; margin: 0;">
-    <v-col cols="3" class="nav-col" style="padding-top: 12px; padding-bottom: 12px;">
+    <v-col cols="3" class="nav-col" style="padding-top: 12px; padding-bottom: 12px;" >
       <v-list density="compact" nav>
         <v-list-item
           v-for="item in navItems"

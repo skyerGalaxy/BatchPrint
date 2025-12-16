@@ -39,6 +39,9 @@ const pdfPages = ref(0);
 const pdfScale = ref(2); // 控制清晰度
 const pdfContainerRef = ref<HTMLElement | null>(null);
 
+const pointer_x = ref(0);
+const pointer_y = ref(0);
+
 const dialog = ref(false);
 
 const bpStore = useBPStore();
@@ -106,14 +109,13 @@ function onCanvasClick(e: MouseEvent, pageIndex: number) {
   const clientY = e.clientY;
 
   // 将屏幕坐标转换为 canvas 绘制坐标（与 canvas.width / canvas.height 对应）
-  const x = (clientX - rect.left) * (canvas.width / rect.width);
-  const y = (clientY - rect.top) * (canvas.height / rect.height);
+  const pointer_x = (clientX - rect.left) * (canvas.width / rect.width);
+  const pointer_y = (clientY - rect.top) * (canvas.height / rect.height);
 
   // 归一化坐标（0..1）
   const nx = (clientX - rect.left) / rect.width;
   const ny = (clientY - rect.top) / rect.height;
 
-  bpStore.setPointer(pageIndex, x, y);
 
   // 保留原来的行为：切换对话框显示
   dialog.value = !dialog.value;

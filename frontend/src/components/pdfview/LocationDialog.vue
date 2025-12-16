@@ -1,6 +1,6 @@
 <script setup lang="ts">
 
-  import { defineProps,defineEmits,ref } from "vue";
+  import { ref } from "vue";
   import { useBPStore } from "@/stores/bpstore";
 
   import MaterialPanel from "./MaterialPanel.vue";

@@ -11,7 +11,7 @@
       <v-list nav>
         <div class="mt-15">模板</div>
         <v-file-input
-          accept=".pdf"
+          accept="application/pdf,.pdf"
           prepend-icon="mdi-file-pdf"
           label="File input"
           @change="handleFileChange"
