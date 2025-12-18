@@ -22,8 +22,8 @@
             </v-list-item>
             <v-divider></v-divider>
             <v-list density="compact">
-              <v-list-item>
-                <v-list-item-title>Settings</v-list-item-title>
+              <v-list-item @click="settingsDialog?.openDialog()">
+                  <v-list-item-title>Settings</v-list-item-title>
               </v-list-item>
               <v-list-item>
                 <v-list-item-title>Logout</v-list-item-title>
@@ -74,6 +74,8 @@
     <v-main class="d-flex align-center justify-center" style="flex:1;height: 100vh;">
       <PdfViewer :pdfSrc="pdfSrc" />
     </v-main>
+
+    <SettingsDialog ref="settingsDialog" />
   </v-layout>
 </template>
 
@@ -82,10 +84,12 @@ import { ref } from 'vue';
 import { useBPStore } from './stores/bpstore';
 import axios from 'axios';
 import PdfViewer from './components/pdfview/PdfViewer.vue';
-import { tr } from 'vuetify/locale';
+import SettingsDialog from './components/global/SettingsDialog.vue';
 
 const pdfSrc = ref<string>('');
 const useBPStoreInstance = useBPStore();
+
+const settingsDialog = ref<InstanceType<typeof SettingsDialog> | null>(null);
 
 const handleFileChange = async (event: Event) => {
   const fileInput = event.target as HTMLInputElement;
