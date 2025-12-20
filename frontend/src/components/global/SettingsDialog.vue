@@ -1,6 +1,9 @@
 <script setup lang="ts">
-    import {ref} from 'vue'
+    import {ref, onMounted} from 'vue'
+    import { useBPStore } from '@/stores/bpstore'
+    import { open } from '@tauri-apps/plugin-dialog'
 
+    const store = useBPStore()
     const dialog = ref(false)
     const selectedItemIndex = ref(0)
     const settingsItems = [
@@ -10,9 +13,23 @@
         { title: '关于', icon: 'mdi-information' },
     ];
 
-    function openPathDialog() {
-        // 这里可以添加打开文件选择对话框的逻辑
-        console.log('打开文件选择对话框');
+    async function openPathDialog() {
+        try {
+            const selected = await open({
+                directory: true,
+                multiple: false,
+                title: '选择图片存储路径'
+            });
+            
+            if (selected && typeof selected === 'string') {
+                const success = await store.saveConfig(selected);
+                if (success) {
+                    console.log('路径已更新:', selected);
+                }
+            }
+        } catch (error) {
+            console.error('打开文件对话框失败:', error);
+        }
     }
 
     function saveSettings() {
@@ -26,6 +43,10 @@
         dialog.value = true;
         selectedItemIndex.value = 0;
     }
+
+    onMounted(async () => {
+        await store.loadConfig();
+    });
 
     defineExpose({
         openDialog,
@@ -45,7 +66,7 @@
                     <v-icon>mdi-close</v-icon>
                 </v-btn>
             </v-toolbar>
-            <div class="d-flex flex-row">
+            <div class="d-flex flex-row" style="max-height: 600px;height: 300px; overflow-y: auto;">
                 <v-list density="comfortable" nav class="flex-grow-0 flex-shrink-0" style ="width: 250px;">
                     <v-list-item
                         v-for="(item,i) in settingsItems"
@@ -61,18 +82,18 @@
                 </v-list>
                 <v-card-text class="flex-grow-1 pa-4">
                     <v-window v-model="selectedItemIndex"direction="vertical">
-                        <v-window-item :value="1">
+                        <v-window-item :value="0">
                             <div>通用设置</div>
                         </v-window-item>
 
-                        <v-window-item :value="2">
+                        <v-window-item :value="1">
                             <h2 class="text-h6 mb-4">存储与路径</h2>
                             <p class="text-subtitle-1 mb-2">图片存储路径:</p>
                             <v-text-field
                                 label="当前路径"
                                 density="compact"
                                 readonly
-                                model-value="/user/images"
+                                :model-value="store.imageStoragePath"
                                 append-icon="mdi-folder-open"
                                 @click:append="openPathDialog"
                             />
@@ -82,11 +103,11 @@
                             </v-alert>
                         </v-window-item>
 
-                        <v-window-item :value="3">
+                        <v-window-item :value="2">
                             <div>帐户与安全</div>
                         </v-window-item>
 
-                        <v-window-item :value="4">
+                        <v-window-item :value="3">
                             <div>关于</div>
                         </v-window-item>
                     </v-window>
