@@ -2,6 +2,13 @@
   <v-layout class="rounded rounded-md border">
     <v-app-bar title="AutoFiller">
       <template v-slot:append>
+        <v-btn 
+          icon
+          color="primary"
+          @click="libraryPanel?.openDialog()"
+        >
+          <v-icon>mdi-library</v-icon>
+        </v-btn>
         <v-menu
           :offset-y="true"
           :close-on-content-click="true"
@@ -76,6 +83,7 @@
     </v-main>
 
     <SettingsDialog ref="settingsDialog" />
+    <LibraryPanel ref="libraryPanel" />
   </v-layout>
 </template>
 
@@ -85,11 +93,13 @@ import { useBPStore } from './stores/bpstore';
 import axios from 'axios';
 import PdfViewer from './components/pdfview/PdfViewer.vue';
 import SettingsDialog from './components/global/SettingsDialog.vue';
+import LibraryPanel from './components/global/libraryPanel.vue';
 
 const pdfSrc = ref<string>('');
 const useBPStoreInstance = useBPStore();
 
 const settingsDialog = ref<InstanceType<typeof SettingsDialog> | null>(null);
+const libraryPanel = ref<InstanceType<typeof LibraryPanel> | null>(null);
 
 const handleFileChange = async (event: Event) => {
   const fileInput = event.target as HTMLInputElement;

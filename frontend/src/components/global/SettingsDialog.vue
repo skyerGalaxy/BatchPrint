@@ -1,11 +1,12 @@
 <script setup lang="ts">
     import {ref, onMounted} from 'vue'
-    import { useBPStore } from '@/stores/bpstore'
     import { open } from '@tauri-apps/plugin-dialog'
+    import { Store } from '@tauri-apps/plugin-store'
 
-    const store = useBPStore()
     const dialog = ref(false)
     const selectedItemIndex = ref(0)
+    const imagePath = ref('')
+    let settingsStore: Store | null = null
     const settingsItems = [
         { title: '通用设置', icon: 'mdi-cog' },
         { title: '存储与路径', icon: 'mdi-folder-settings' },
@@ -22,10 +23,12 @@
             });
             
             if (selected && typeof selected === 'string') {
-                const success = await store.saveConfig(selected);
-                if (success) {
-                    console.log('路径已更新:', selected);
+                imagePath.value = selected
+                if (!settingsStore) {
+                    settingsStore = await Store.load('settings.json')
                 }
+                await settingsStore.set('image_storage_path', selected)
+                await settingsStore.save()
             }
         } catch (error) {
             console.error('打开文件对话框失败:', error);
@@ -44,9 +47,22 @@
         selectedItemIndex.value = 0;
     }
 
-    onMounted(async () => {
-        await store.loadConfig();
-    });
+    async function initStore() {
+        try {
+            settingsStore = await Store.load('settings.json')
+            const val = await settingsStore.get<string>('image_storage_path')
+            if (typeof val === 'string') {
+                imagePath.value = val
+            }
+        } catch (e) {
+            console.warn('初始化设置存储失败:', e)
+        }
+    }
+
+    onMounted(() => {
+        initStore()
+    })
+
 
     defineExpose({
         openDialog,
@@ -93,8 +109,8 @@
                                 label="当前路径"
                                 density="compact"
                                 readonly
-                                :model-value="store.imageStoragePath"
                                 append-icon="mdi-folder-open"
+                                v-model="imagePath"
                                 @click:append="openPathDialog"
                             />
                             <v-btn color="success" class="mt-2" @click="openPathDialog">更改路径</v-btn>
