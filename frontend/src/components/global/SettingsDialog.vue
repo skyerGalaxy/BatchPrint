@@ -3,6 +3,8 @@
     import { open } from '@tauri-apps/plugin-dialog'
     import { Store } from '@tauri-apps/plugin-store'
 
+    import { useBPStore } from '@/stores/bpstore'
+
     const dialog = ref(false)
     const selectedItemIndex = ref(0)
     const imagePath = ref('')
@@ -13,6 +15,8 @@
         { title: '帐户与安全', icon: 'mdi-account-circle' },
         { title: '关于', icon: 'mdi-information' },
     ];
+
+    const bpStore = useBPStore();
 
     async function openPathDialog() {
         try {
@@ -27,7 +31,9 @@
                 if (!settingsStore) {
                     settingsStore = await Store.load('settings.json')
                 }
-                await settingsStore.set('image_storage_path', selected)
+                await settingsStore.set('image_storage_path', selected).then(() => {
+                    bpStore.imagePath = selected;
+                });
                 await settingsStore.save()
             }
         } catch (error) {

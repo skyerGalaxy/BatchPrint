@@ -9,6 +9,19 @@
     "core:default",
     "dialog:allow-open",
     "dialog:allow-save",
-    "store:default"
+    "store:default",
+    "fs:default",
+    {
+      "identifier": "fs:allow-read-dir",
+      "allow": [
+        { "path": "$HOME/**" }
+      ]
+    },
+    {
+      "identifier": "fs:allow-read-file",
+      "allow": [
+        { "path": "$HOME/**" }
+      ]
+    }
   ]
 }
