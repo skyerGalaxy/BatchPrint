@@ -11,6 +11,9 @@
     "dialog:allow-save",
     "store:default",
     "fs:default",
+    "fs:read-all",
+    "fs:allow-write",
+    "fs:allow-exists",
     {
       "identifier": "fs:allow-read-dir",
       "allow": [

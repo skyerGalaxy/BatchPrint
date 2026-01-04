@@ -33,6 +33,7 @@
                 }
                 await settingsStore.set('image_storage_path', selected).then(() => {
                     bpStore.imagePath = selected;
+                    console.log('bpStore.imagePath:', bpStore.imagePath);
                 });
                 await settingsStore.save()
             }
