@@ -12,18 +12,28 @@
     "store:default",
     "fs:default",
     "fs:read-all",
-    "fs:allow-write",
-    "fs:allow-exists",
+    {
+      "identifier": "fs:allow-write-file",
+      "allow": [
+        { "path": "**" }
+      ]
+    },
+    {
+      "identifier": "fs:allow-exists",
+      "allow": [
+        { "path": "**" }
+      ]
+    },
     {
       "identifier": "fs:allow-read-dir",
       "allow": [
-        { "path": "$HOME/**" }
+        { "path": "**" }
       ]
     },
     {
       "identifier": "fs:allow-read-file",
       "allow": [
-        { "path": "$HOME/**" }
+        { "path": "**" }
       ]
     }
   ]

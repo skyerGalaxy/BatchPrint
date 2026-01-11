@@ -7,7 +7,6 @@
 
 
     const dialog = ref(false)
-    let settingsStore: Store | null = null;
     const imagePath = ref('');
     const imageList = ref<string[]>([]);
     const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'];
@@ -39,8 +38,6 @@
             if (!selected) return;
 
             const files = Array.isArray(selected) ? selected : [selected];
-
-            console.log('选择的文件:', files);
             
             for (const filePath of files) {
                 try {
@@ -61,7 +58,6 @@
                     
                     // 写入目标文件
                     await writeFile(finalPath, fileData);
-                    console.log('上传文件成功:', finalPath);
                 } catch (error) {
                     console.error('上传单个文件失败:', error);
                 }
@@ -88,8 +84,6 @@
                 .map(file => file.name)
                 .filter(name => imageExtensions.some(ext => name.toLowerCase().endsWith(ext)))
                 .map(name => convertFileSrc(`${imagePath.value}/${name}`));
-
-            console.log('加载图片:', imageList.value);
         } catch (error) {
             console.error('无法读取图片目录:', error);
             imageList.value = [];
@@ -104,7 +98,6 @@
     onMounted(async () => {
         try {
             imagePath.value = bpStore.imagePath || '';
-            console.log('图片存储路径:', imagePath.value);
             await loadImages();
         } catch (error) {
             console.error('无法获取 image_storage_path 的值:', error);
@@ -112,7 +105,6 @@
     });
 
     watch(() => bpStore.imagePath, async (newPath) => {
-        console.log('检测到图片存储路径变化:', newPath);
         imagePath.value = newPath || '';
         await loadImages();
     });
