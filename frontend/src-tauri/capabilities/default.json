@@ -35,6 +35,24 @@
       "allow": [
         { "path": "**" }
       ]
+    },
+    {
+      "identifier": "fs:allow-mkdir",
+      "allow": [
+        { "path": "**" }
+      ]
+    },
+    {
+      "identifier": "fs:allow-app-write-recursive",
+      "allow": [
+        { "path": "**" }
+      ]
+    },
+    {
+      "identifier": "fs:allow-app-read-recursive",
+      "allow": [
+        { "path": "**" }
+      ]
     }
   ]
 }

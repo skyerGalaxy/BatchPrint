@@ -1,7 +1,8 @@
 import { ref } from "vue";
 import { defineStore } from "pinia";
 import {Store} from '@tauri-apps/plugin-store'
-import { image } from "@tauri-apps/api";
+import { BaseDirectory, mkdir } from "@tauri-apps/plugin-fs";
+import { appDataDir, appLocalDataDir } from '@tauri-apps/api/path';
 
 interface Pointer {
   pageIndex: number;  
@@ -62,11 +63,26 @@ export const useBPStore = defineStore("bpstore", () => {
   }
 
   async function initializeApp() {
-    if (!settingsStore) {
-      settingsStore = await Store.load('settings.json')
+    try {
+      const store = await Store.load('settings.json');
+      settingsStore = store;
+      
+      let path = await store.get('image_storage_path') as string | null;
+
+      if (!path) {
+        path = await appLocalDataDir();
+        await store.set('image_storage_path', path);
+        
+        await Promise.all([
+          mkdir(`${path}/sealImg`, { recursive: true }),
+          mkdir(`${path}/signImg`, { recursive: true }),
+        ]);
+      }
+      
+      imagePath.value = path;
+    } catch (error) {
+      console.error('Failed to initialize app:', error);
     }
-    imagePath.value = await settingsStore.get('image_storage_path') || "";
-    console.log("Image path loaded:", imagePath.value);
   }
 
 
