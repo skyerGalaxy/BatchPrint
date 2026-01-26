@@ -2,8 +2,10 @@
     import {ref, onMounted} from 'vue'
     import { open } from '@tauri-apps/plugin-dialog'
     import { Store } from '@tauri-apps/plugin-store'
+    import { invoke } from '@tauri-apps/api/core'
 
     import { useBPStore } from '@/stores/bpstore'
+    import { mkdir } from '@tauri-apps/plugin-fs'
 
     const dialog = ref(false)
     const selectedItemIndex = ref(0)
@@ -16,26 +18,29 @@
         { title: '关于', icon: 'mdi-information' },
     ];
 
+    const selectedPath = ref<string>('');
+
+    //控制是否移动选项对话框
+    const isMovingDialog = ref(false)
+
     const bpStore = useBPStore();
 
     async function openPathDialog() {
         try {
-            const selected = await open({
+            const result = await open({
                 directory: true,
                 multiple: false,
                 title: '选择图片存储路径'
             });
-            
-            if (selected && typeof selected === 'string') {
-                imagePath.value = selected
-                if (!settingsStore) {
-                    settingsStore = await Store.load('settings.json')
+            if (result) {
+                // 如果选择的路径与当前路径相同，直接返回
+                if (result === bpStore.imagePath) {
+                    console.info('选择的路径与当前路径相同');
+                    return;
                 }
-                await settingsStore.set('image_storage_path', selected).then(() => {
-                    bpStore.imagePath = selected;
-                    console.log('bpStore.imagePath:', bpStore.imagePath);
-                });
-                await settingsStore.save()
+                selectedPath.value = result;
+                isMovingDialog.value = true;
+                console.log('选择的路径:', result);
             }
         } catch (error) {
             console.error('打开文件对话框失败:', error);
@@ -52,6 +57,47 @@
         console.log('打开设置对话框');
         dialog.value = true;
         selectedItemIndex.value = 0;
+    }
+
+    // 公共函数：更新路径到所有存储位置
+    async function updateImagePath(newPath: string) {
+        imagePath.value = newPath;
+        if (!settingsStore) {
+            settingsStore = await Store.load('settings.json');
+        }
+        await settingsStore.set('image_storage_path', newPath);
+        await settingsStore.save();
+        bpStore.imagePath = newPath;
+    }
+
+    async function createFolder(path: string) {
+        try {
+            await Promise.all([
+                mkdir(`${path}/sealImg`, { recursive: true }),
+                mkdir(`${path}/signImg`, { recursive: true }),
+            ]);
+            await updateImagePath(path);
+            isMovingDialog.value = false;
+            console.log('文件夹创建并路径已更新');
+        } catch (error) {
+            console.error('创建文件夹失败:', error);
+        }
+    }
+
+    async function moveFolders(newPath: string) {
+        try {
+            const result = await invoke('move_folder_with_extra', {
+                src: bpStore.imagePath,
+                dest: newPath
+            });
+            console.log('移动结果:', result);
+            
+            await updateImagePath(newPath);
+            isMovingDialog.value = false;
+            console.log('文件夹移动成功');
+        } catch (error) {
+            console.error('移动文件夹失败:', error);
+        }
     }
 
     async function initStore() {
@@ -118,7 +164,6 @@
                                 readonly
                                 append-icon="mdi-folder-open"
                                 v-model="imagePath"
-                                @click:append="openPathDialog"
                             />
                             <v-btn color="success" class="mt-2" @click="openPathDialog">更改路径</v-btn>
                             <v-alert type="info" class="mt-4">
@@ -140,6 +185,21 @@
             <v-card-actions class="d-flex justify-end bg-grey-lighten-4">
                 <v-btn color="primary" @click="saveSettings">保存</v-btn>
                 <v-btn text @click="dialog = false">关闭</v-btn>
+            </v-card-actions>
+        </v-card>
+    </v-dialog>
+    <v-dialog
+        v-model="isMovingDialog"
+        persistent
+        max-width="400"
+    >
+        <v-card>
+            <v-card-text>
+                是否要移动原有图片到新路径？
+            </v-card-text>
+            <v-card-actions class="d-flex justify-end">
+                <v-btn text @click="createFolder(selectedPath)">否</v-btn>
+                <v-btn color="primary" @click="moveFolders(selectedPath)">是</v-btn>
             </v-card-actions>
         </v-card>
     </v-dialog>
