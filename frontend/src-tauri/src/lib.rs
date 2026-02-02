@@ -24,7 +24,7 @@ pub fn run() {
 
 use fs_extra::dir::{move_dir, CopyOptions};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{PathBuf};
 
 #[tauri::command]
 async fn move_folder_with_extra(src: String, dest: String) -> Result<String, String> {
