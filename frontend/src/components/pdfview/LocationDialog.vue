@@ -1,36 +1,39 @@
 <script setup lang="ts">
+import { ref } from "vue";
+import { useBPStore } from "@/stores/bpstore";
+import MaterialPanel from "./MaterialPanel.vue";
 
-  import { ref } from "vue";
-  import { useBPStore } from "@/stores/bpstore";
+const props = defineProps({
+  dialog: {
+    type: Boolean,
+    required: true
+  }
+});
 
-  import MaterialPanel from "./MaterialPanel.vue";
+const emits = defineEmits(['update:dialog']);
 
-  const props = defineProps({
-    dialog: {
-      type: Boolean,
-      required: true
-    }
-  });
+const tab = ref('1');
+const step = ref(1);
 
-  const emits = defineEmits(['update:dialog']);
+const bpStore = useBPStore();
 
-  const tab = ref(1);
+// 选项数据
+type SelectedOption = 
+  | { type: 'field'; fieldName: string; fontSize?: number; fontFamily?: string }
+  | { type: 'image'; src: string }
+  | null;
 
-  const bpStore = useBPStore();
+const selectedOption = ref<SelectedOption>(null);
 
-  const selectedField = ref<string | null>(bpStore.fieldNames.length > 0 ? bpStore.fieldNames[0] : null);
+// 字体配置（仅用于字段类型）
+const fontSize = ref(12);
+const fontFamily = ref('微软雅黑');
+const fontFamilies = ['微软雅黑', '宋体', '黑体', 'Arial', 'Times New Roman'];
 
-
-  const step = ref(1);
-
-  // ---------- 新增：条件行状态与方法 ----------
-
-const matchMode = ref('所有'); // '所有' 或 '任一'
-
+// 条件数据
 type Condition = { id: number; field: string | null; op: string; value: string };
-
-const ops = ['等于','不等于','包含','不包含','为空','不为空'];
-
+const ops = ['等于', '不等于', '包含', '不包含', '为空', '不为空'];
+const matchMode = ref('所有');
 const conditions = ref<Condition[]>([
   { id: Date.now(), field: null, op: '等于', value: '' }
 ]);
@@ -42,16 +45,38 @@ function addCondition() {
     op: '等于',
     value: ''
   });
-  nextTick(() => {});
 }
 
 function removeCondition(index: number) {
   conditions.value.splice(index, 1);
 }
+
+function handleConfirm() {
+  let finalOption = selectedOption.value;
+  
+  // 如果选择的是字段，添加字体配置
+  if (finalOption && finalOption.type === 'field') {
+    finalOption = {
+      ...finalOption,
+      fontSize: fontSize.value,
+      fontFamily: fontFamily.value
+    };
+  }
+  
+  const result = tab.value === '1'
+    ? { mode: 'single', option: finalOption }
+    : { mode: 'conditional', conditions: conditions.value, matchMode: matchMode.value, option: finalOption };
+  console.log('确定提交:', result);
+  emits('update:dialog', false);
+}
+
+function handleCancel() {
+  emits('update:dialog', false);
+}
 </script>
 
 <template>
-  <v-dialog v-model="props.dialog" max-width="500">
+  <v-dialog v-model="props.dialog" max-width="650">
       <!-- 固定高度，保持列布局 -->
       <v-card style="height: 40vh; min-height: 40vh; max-height: 40vh; display: flex; flex-direction: column;">
         <v-card-item>
@@ -67,16 +92,44 @@ function removeCondition(index: number) {
           </v-tabs>
         </v-card-item>
 
-        <!-- 将外层隐藏滚动，内部左右两栏分别控制滚动 -->
+        <!-- 主内容区域 -->
         <v-card-text style="flex: 1; overflow: hidden; padding: 0 12px;">
           <v-tabs-window v-model="tab" style="height: 100%;">
+            <!-- Tab 1: 单一选项 - 直接显示选项选择 -->
             <v-tabs-window-item value="1" style="height: 100%;">
-              <material-panel v-model:selected-field="selectedField"/>
+              <v-row style="height: 100%; margin: 0;">
+                <v-col :cols="selectedOption?.type === 'field' ? 8 : 12" style="height: 100%; padding-right: 8px;">
+                  <material-panel
+                    @select_option="selectedOption = $event"
+                  />
+                </v-col>
+                <v-col v-if="selectedOption?.type === 'field'" cols="4" style="height: 100%; border-left: 1px solid #e0e0e0; padding-left: 12px; overflow-y: auto;">
+                  <div style="padding-top: 12px;">
+                    <h4 style="margin-bottom: 16px; font-size: 14px;">字体设置</h4>
+                    <v-select
+                      v-model="fontFamily"
+                      :items="fontFamilies"
+                      label="字体"
+                      density="compact"
+                      style="margin-bottom: 12px;"
+                    ></v-select>
+                    <v-text-field
+                      v-model.number="fontSize"
+                      label="字号"
+                      type="number"
+                      density="compact"
+                      :min="8"
+                      :max="72"
+                    ></v-text-field>
+                  </div>
+                </v-col>
+              </v-row>
             </v-tabs-window-item>
 
-            <v-tabs-window-item value="2">
-              <v-window v-model="step">
-                <v-window-item :value="1">
+            <!-- Tab 2: 条件选项 - 两步流程 -->
+            <v-tabs-window-item value="2" style="height: 100%;">
+              <v-window v-model="step" style="height: 100%;">
+                <v-window-item :value="1" style="height: 100%;">
                   <div style="display:flex; align-items:center; margin-bottom:8px; height:32px; min-height:32px; padding:4px 0;">
                     <div style="font-size:13px; line-height:32px;">查找条件</div>
                     <v-spacer></v-spacer>
@@ -126,8 +179,35 @@ function removeCondition(index: number) {
                     </div>
                   </div>
                 </v-window-item>
-                <v-window-item :value="2">
-                  <material-panel v-model:selected-field="selectedField"/>
+                <!-- Step 2: 选项选择 -->
+                <v-window-item :value="2" style="height: 100%;">
+                  <v-row style="height: 100%; margin: 0;">
+                    <v-col :cols="selectedOption?.type === 'field' ? 8 : 12" style="height: 100%; padding-right: 8px;">
+                      <material-panel
+                        @select_option="selectedOption = $event"
+                      />
+                    </v-col>
+                    <v-col v-if="selectedOption?.type === 'field'" cols="4" style="height: 100%; border-left: 1px solid #e0e0e0; padding-left: 12px; overflow-y: auto;">
+                      <div style="padding-top: 12px;">
+                        <h4 style="margin-bottom: 16px; font-size: 14px;">字体设置</h4>
+                        <v-select
+                          v-model="fontFamily"
+                          :items="fontFamilies"
+                          label="字体"
+                          density="compact"
+                          style="margin-bottom: 12px;"
+                        ></v-select>
+                        <v-text-field
+                          v-model.number="fontSize"
+                          label="字号"
+                          type="number"
+                          density="compact"
+                          :min="8"
+                          :max="72"
+                        ></v-text-field>
+                      </div>
+                    </v-col>
+                  </v-row>
                 </v-window-item>
               </v-window>
             </v-tabs-window-item>
@@ -135,35 +215,28 @@ function removeCondition(index: number) {
           </v-tabs-window>
         </v-card-text>
 
-        <v-card-actions v-if="tab==1">
+        <!-- 单一选项底部按钮 -->
+        <v-card-actions v-if="tab=='1'">
           <v-spacer></v-spacer>
-          <v-btn color="primary" text @click="emits('update:dialog',false)">Disagree</v-btn>
-          <v-btn color="primary" text @click="emits('update:dialog',false)">Agree</v-btn>
+          <v-btn text @click="handleCancel">取消</v-btn>
+          <v-btn color="primary" @click="handleConfirm">确定</v-btn>
         </v-card-actions>
-        <v-card-actions v-if="tab==2&&step==1">
-          <!-- 添加条件 -->
-            <v-btn text small color="primary" @click="addCondition">
-              <v-icon left>mdi-plus</v-icon> 添加条件
-            </v-btn>
-            <v-spacer></v-spacer>
-            <v-btn
-              color="primary"
-              variant="flat"
-              @click="step++; console.log(conditions)"
-            >
-              下一步
-            </v-btn>
+
+        <!-- 条件选项第一步：编辑条件 -->
+        <v-card-actions v-if="tab=='2'&&step==1">
+          <v-btn text small color="primary" @click="addCondition">
+            <v-icon left>mdi-plus</v-icon>添加条件
+          </v-btn>
+          <v-spacer></v-spacer>
+          <v-btn color="primary" @click="step++">下一步</v-btn>
         </v-card-actions>
-        <v-card-actions v-if="tab==2&&step==2">
-            <v-btn
-              variant="flat"
-              @click="step--"
-            >
-              上一步
-            </v-btn>
-            <v-spacer></v-spacer>
-            <v-btn color="primary" text @click="emits('update:dialog',false)">Disagree</v-btn>
-            <v-btn color="primary" text @click="emits('update:dialog',false)">Agree</v-btn>
+
+        <!-- 条件选项第二步：选择选项 -->
+        <v-card-actions v-if="tab=='2'&&step==2">
+          <v-btn text @click="step--">上一步</v-btn>
+          <v-spacer></v-spacer>
+          <v-btn text @click="handleCancel">取消</v-btn>
+          <v-btn color="primary" @click="handleConfirm">确定</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>

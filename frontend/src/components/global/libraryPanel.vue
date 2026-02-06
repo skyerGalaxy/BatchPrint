@@ -142,6 +142,8 @@
         if (!imagePath.value) {
             imageList_signature.value = [];
             imageList_seal.value = [];
+            bpStore.imageList_signature = [];
+            bpStore.imageList_seal = [];
             return;
         }
 
@@ -150,10 +152,14 @@
                 loadImagesFromDir(`${imagePath.value}/signImg`),
                 loadImagesFromDir(`${imagePath.value}/sealImg`)
             ]);
+            bpStore.imageList_signature = imageList_signature.value;
+            bpStore.imageList_seal = imageList_seal.value;
         } catch (error) {
             console.error('加载图片列表失败:', error);
             imageList_signature.value = [];
             imageList_seal.value = [];
+            bpStore.imageList_signature = [];
+            bpStore.imageList_seal = [];
         }
     }
 

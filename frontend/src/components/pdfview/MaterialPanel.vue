@@ -10,7 +10,7 @@ const props = defineProps({
   }
 });
 
-const emits = defineEmits(['update:selectedField']);
+const emits = defineEmits(['select_option']);
 
 const bpStore = useBPStore();
 
@@ -21,10 +21,25 @@ const navItems = [
   { title: '印章', value: 'seal' },
 ];
 
-const localSelected = computed<string | null>({
-  get: () => props.selectedField ?? (bpStore.fieldNames.length > 0 ? bpStore.fieldNames[0] : null),
-  set: (v) => emits('update:selectedField', v)
-});
+const selectedImageType = ref<'signature' | 'seal' | null>(null);
+const selectedImageIndex = ref<number | null>(null);
+
+function selectImage(type: 'signature' | 'seal', index: number) {
+  selectedImageType.value = type;
+  selectedImageIndex.value = index;
+  const list = type === 'signature' ? bpStore.imageList_signature : bpStore.imageList_seal;
+  emits('select_option', {
+    type: 'image',
+    src: list[index] ?? ''
+  });
+}
+
+function selectField(fieldName: string) {
+  emits('select_option', {
+    type: 'field',
+    fieldName
+  });
+}
 </script>
 
 <template>
@@ -43,47 +58,65 @@ const localSelected = computed<string | null>({
 
     <v-col cols="9" style="overflow: auto; max-height: 100%;">
       <div v-if="activeNav === 'table'">
-        <v-radio-group v-model="localSelected" column>
-          <v-virtual-scroll
-            :items="bpStore.fieldNames"
-            :height="300"
-            item-height="40"
+        <div style="max-height: 400px; overflow-y: auto;">
+          <v-radio-group
+            :model-value="selectedField"
+            @update:model-value="(value) => selectField(value as string)"
           >
-            <template #default="{ item }">
-              <v-radio
-                :key="item"
-                :label="item"
-                :value="item"
-              ></v-radio>
-            </template>
-          </v-virtual-scroll>
-        </v-radio-group>
+            <v-radio
+              v-for="item in bpStore.fieldNames"
+              :key="item"
+              :label="item"
+              :value="item"
+            ></v-radio>
+          </v-radio-group>
+        </div>
       </div>
 
       <div v-else-if="activeNav === 'signature'">
-        <h3>签字</h3>
-        <v-virtual-scroll
-          :items="Array.from({length: 20}, (_, i) => i + 1)"
-          :height="300"
-          item-height="24"
+        <div v-if="bpStore.imageList_signature.length === 0" class="text-center py-8">
+            <p class="text-grey">暂无签名</p>
+        </div>
+        <div
+          v-else
+          style="max-height: 400px; overflow-y: auto;"
         >
-          <template #default="{ item }">
-            <p :key="item">示例占位内容行 {{ item }}</p>
-          </template>
-        </v-virtual-scroll>
+          <v-row dense>
+            <v-col v-for="(imgSrc, index) in bpStore.imageList_signature" :key="index" cols="12" sm="6" md="6">
+                <v-img
+                  :src="imgSrc"
+                  aspect-ratio="1"
+                  cover
+                  class="rounded img-tile"
+                  :class="{ 'is-selected': selectedImageType === 'signature' && selectedImageIndex === index }"
+                  @click="selectImage('signature', index)"
+                ></v-img>
+            </v-col>
+          </v-row>
+        </div>
       </div>
 
       <div v-else-if="activeNav === 'seal'">
-        <h3>印章</h3>
-        <v-virtual-scroll
-          :items="Array.from({length: 2}, (_, i) => i + 1)"
-          :height="300"
-          item-height="24"
+        <div v-if="bpStore.imageList_seal.length === 0" class="text-center py-8">
+            <p class="text-grey">暂无印章</p>
+        </div>
+        <div
+          v-else
+          style="max-height: 400px; overflow-y: auto;"
         >
-          <template #default="{ item }">
-            <p :key="item">示例占位内容行 {{ item }}</p>
-          </template>
-        </v-virtual-scroll>
+          <v-row dense>
+            <v-col v-for="(imgSrc, index) in bpStore.imageList_seal" :key="index" cols="12" sm="6" md="6">
+                <v-img
+                  :src="imgSrc"
+                  aspect-ratio="1"
+                  cover
+                  class="rounded img-tile"
+                  :class="{ 'is-selected': selectedImageType === 'seal' && selectedImageIndex === index }"
+                  @click="selectImage('seal', index)"
+                ></v-img>
+            </v-col>
+          </v-row>
+        </div>
       </div>
     </v-col>
   </v-row>
@@ -95,5 +128,15 @@ const localSelected = computed<string | null>({
   display: flex;
   flex-direction: column;
   height: 100%;
+}
+
+.img-tile {
+  cursor: pointer;
+  opacity: 0.3;
+  transition: opacity 0.15s ease-in-out;
+}
+
+.img-tile.is-selected {
+  opacity: 1;
 }
 </style>

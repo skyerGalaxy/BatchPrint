@@ -1,8 +1,8 @@
 import { ref } from "vue";
 import { defineStore } from "pinia";
 import {Store} from '@tauri-apps/plugin-store'
-import { BaseDirectory, mkdir } from "@tauri-apps/plugin-fs";
-import { appDataDir, appLocalDataDir } from '@tauri-apps/api/path';
+import { mkdir } from "@tauri-apps/plugin-fs";
+import { appLocalDataDir } from '@tauri-apps/api/path';
 
 interface Pointer {
   pageIndex: number;  
@@ -29,6 +29,8 @@ export const useBPStore = defineStore("bpstore", () => {
   const fieldNames = ref<string[]>([]);
   const pointers = ref<PointerType[]>([]);
   const imagePath = ref<string>("");
+  const imageList_signature = ref<string[]>([]);
+  const imageList_seal = ref<string[]>([]);
   let settingsStore: Store | null = null;
 
   function addRegularPointer(pageIndex: number, x: number, y: number, path: string, size: number) {
@@ -91,6 +93,8 @@ export const useBPStore = defineStore("bpstore", () => {
     fieldNames, 
     pointers, 
     imagePath,
+    imageList_signature,
+    imageList_seal,
     addRegularPointer, 
     addConditionalPointer, 
     removePointer,
