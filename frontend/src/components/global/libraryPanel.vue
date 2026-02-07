@@ -196,6 +196,13 @@
                     <v-icon>mdi-upload</v-icon>
                 </v-btn>
                 <v-spacer></v-spacer>
+                <v-btn 
+                    icon 
+                    @click="loadImages" 
+                    title="刷新"
+                >
+                    <v-icon>mdi-refresh</v-icon>
+                </v-btn>
                 <v-btn icon @click="dialog = false">
                     <v-icon>mdi-close</v-icon>
                 </v-btn>
@@ -207,7 +214,7 @@
                         <v-tab value="two">印章</v-tab>
                     </v-tabs>
                     <v-divider></v-divider>
-                    <v-tabs-window v-model="tab">
+                    <v-tabs-window v-model="tab" class="overflow-y-auto" style="height: 600px;">
                         <v-tabs-window-item v-for="tabValue in ['one', 'two']" :key="tabValue" :value="tabValue">
                             <v-sheet class="pa-4">
                                 <div v-if="currentImageList.length === 0" class="text-center py-8">

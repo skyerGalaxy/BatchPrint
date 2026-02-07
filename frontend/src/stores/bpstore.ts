@@ -33,6 +33,9 @@ export const useBPStore = defineStore("bpstore", () => {
   const imageList_seal = ref<string[]>([]);
   let settingsStore: Store | null = null;
 
+  const iconList = ref<{}[]>([]);
+
+
   function addRegularPointer(pageIndex: number, x: number, y: number, path: string, size: number) {
     const newPointer: RegularPointer = {
       type: "regular",
@@ -95,6 +98,7 @@ export const useBPStore = defineStore("bpstore", () => {
     imagePath,
     imageList_signature,
     imageList_seal,
+    iconList,
     addRegularPointer, 
     addConditionalPointer, 
     removePointer,

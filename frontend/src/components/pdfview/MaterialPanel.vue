@@ -1,14 +1,7 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref } from 'vue';
 import { useBPStore } from '@/stores/bpstore';
-import type { PropType } from 'vue';
 
-const props = defineProps({
-  selectedField: {
-    type: String as PropType<string | null>,
-    default: null
-  }
-});
 
 const emits = defineEmits(['select_option']);
 
@@ -24,6 +17,14 @@ const navItems = [
 const selectedImageType = ref<'signature' | 'seal' | null>(null);
 const selectedImageIndex = ref<number | null>(null);
 
+const selectedField = ref<string | null>(null);
+
+// icon 配置
+const size = ref(40);
+const fontFamily = ref('微软雅黑');
+const fontFamilies = ['微软雅黑', '宋体', '黑体', 'Arial', 'Times New Roman'];
+
+
 function selectImage(type: 'signature' | 'seal', index: number) {
   selectedImageType.value = type;
   selectedImageIndex.value = index;
@@ -34,10 +35,12 @@ function selectImage(type: 'signature' | 'seal', index: number) {
   });
 }
 
-function selectField(fieldName: string) {
+function selectField(fieldName: string | null = null) {
   emits('select_option', {
     type: 'field',
-    fieldName
+    fieldName: fieldName ?? selectedField.value ?? '',
+    fontFamily: fontFamily.value,
+    size: size.value
   });
 }
 </script>
@@ -58,19 +61,42 @@ function selectField(fieldName: string) {
 
     <v-col cols="9" style="overflow: auto; max-height: 100%;">
       <div v-if="activeNav === 'table'">
-        <div style="max-height: 400px; overflow-y: auto;">
-          <v-radio-group
-            :model-value="selectedField"
-            @update:model-value="(value) => selectField(value as string)"
-          >
-            <v-radio
-              v-for="item in bpStore.fieldNames"
-              :key="item"
-              :label="item"
-              :value="item"
-            ></v-radio>
-          </v-radio-group>
-        </div>
+        <v-row>
+          <v-col style="height: 100%; padding-right: 8px;">
+            <div style="max-height: 400px; overflow-y: auto;">
+                <v-radio-group @update:model-value="(value)=>selectField(value)" v-model="selectedField">
+                <v-radio
+                  v-for="item in bpStore.fieldNames"
+                  :key="item"
+                  :label="item"
+                  :value="item"
+                ></v-radio>
+                </v-radio-group>
+            </div>
+          </v-col>
+          <v-col style="height: 100%; border-left: 1px solid #e0e0e0; padding-left: 12px; overflow-y: auto;">
+            <div style="padding-top: 12px;">
+              <h4 style="margin-bottom: 16px; font-size: 14px;">配置</h4>
+              <v-select
+                v-model="fontFamily"
+                :items="fontFamilies"
+                label="字体"
+                density="compact"
+                style="margin-bottom: 12px;"
+                @update:model-value="()=>selectField()"
+              ></v-select>
+              <v-text-field
+                v-model.number="size"
+                label="大小"
+                type="number"
+                density="compact"
+                :min="16"
+                :max="200"
+                @update:model-value="()=>selectField()"
+              ></v-text-field>
+            </div>
+          </v-col>
+        </v-row>
       </div>
 
       <div v-else-if="activeNav === 'signature'">

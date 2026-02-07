@@ -7,6 +7,14 @@ const props = defineProps({
   dialog: {
     type: Boolean,
     required: true
+  },
+  pageIndex: {
+    type: Number,
+    required: true
+  },
+  pointer: {
+    type: Object as () => { clientX: number; clientY: number },
+    required: true
   }
 });
 
@@ -19,16 +27,12 @@ const bpStore = useBPStore();
 
 // 选项数据
 type SelectedOption = 
-  | { type: 'field'; fieldName: string; fontSize?: number; fontFamily?: string }
+  | { type: 'field'; fieldName: string; fontFamily?: string; size?: number }
   | { type: 'image'; src: string }
   | null;
 
 const selectedOption = ref<SelectedOption>(null);
 
-// 字体配置（仅用于字段类型）
-const fontSize = ref(12);
-const fontFamily = ref('微软雅黑');
-const fontFamilies = ['微软雅黑', '宋体', '黑体', 'Arial', 'Times New Roman'];
 
 // 条件数据
 type Condition = { id: number; field: string | null; op: string; value: string };
@@ -37,9 +41,10 @@ const matchMode = ref('所有');
 const conditions = ref<Condition[]>([
   { id: Date.now(), field: null, op: '等于', value: '' }
 ]);
+const iconId = ref<number>(1);
 
 function addCondition() {
-  conditions.value.push({
+  conditions.value.push({ 
     id: Date.now() + Math.floor(Math.random() * 1000),
     field: null,
     op: '等于',
@@ -52,21 +57,37 @@ function removeCondition(index: number) {
 }
 
 function handleConfirm() {
-  let finalOption = selectedOption.value;
-  
-  // 如果选择的是字段，添加字体配置
-  if (finalOption && finalOption.type === 'field') {
-    finalOption = {
-      ...finalOption,
-      fontSize: fontSize.value,
-      fontFamily: fontFamily.value
-    };
-  }
-  
+
   const result = tab.value === '1'
-    ? { mode: 'single', option: finalOption }
-    : { mode: 'conditional', conditions: conditions.value, matchMode: matchMode.value, option: finalOption };
-  console.log('确定提交:', result);
+    ? {id: iconId.value, pageIndex: props.pageIndex, pointer: props.pointer, mode: 'single', option: selectedOption.value, size: (selectedOption.value as any)?.size }
+    : {id: iconId.value, pageIndex: props.pageIndex, pointer: props.pointer, mode: 'conditional', conditions: conditions.value, matchMode: matchMode.value, option: selectedOption.value, size: (selectedOption.value as any)?.size };
+
+    console.log('最终结果:', result);
+    if(!result.option) {
+      alert('请至少选择一个选项');
+      return;
+    }
+
+    if(result.mode === 'conditional'&& result.conditions!.length <1) {
+      alert('请至少添加一个条件');
+      return;
+    }
+
+    bpStore.iconList.push(result);
+    if (bpStore.iconList.length = iconId.value) {
+      iconId.value++;
+    }
+
+    console.log('当前图标列表:', bpStore.iconList);
+
+    //重置所有状态
+    tab.value = '1';
+    step.value = 1;
+    selectedOption.value = null;
+    conditions.value = [{ id: Date.now(), field: null, op: '等于', value: '' }];
+    matchMode.value = '所有';
+    
+
   emits('update:dialog', false);
 }
 
@@ -97,33 +118,9 @@ function handleCancel() {
           <v-tabs-window v-model="tab" style="height: 100%;">
             <!-- Tab 1: 单一选项 - 直接显示选项选择 -->
             <v-tabs-window-item value="1" style="height: 100%;">
-              <v-row style="height: 100%; margin: 0;">
-                <v-col :cols="selectedOption?.type === 'field' ? 8 : 12" style="height: 100%; padding-right: 8px;">
-                  <material-panel
-                    @select_option="selectedOption = $event"
-                  />
-                </v-col>
-                <v-col v-if="selectedOption?.type === 'field'" cols="4" style="height: 100%; border-left: 1px solid #e0e0e0; padding-left: 12px; overflow-y: auto;">
-                  <div style="padding-top: 12px;">
-                    <h4 style="margin-bottom: 16px; font-size: 14px;">字体设置</h4>
-                    <v-select
-                      v-model="fontFamily"
-                      :items="fontFamilies"
-                      label="字体"
-                      density="compact"
-                      style="margin-bottom: 12px;"
-                    ></v-select>
-                    <v-text-field
-                      v-model.number="fontSize"
-                      label="字号"
-                      type="number"
-                      density="compact"
-                      :min="8"
-                      :max="72"
-                    ></v-text-field>
-                  </div>
-                </v-col>
-              </v-row>
+              <material-panel
+                @select_option="selectedOption = $event;console.log('选项更新:', $event)"
+              />
             </v-tabs-window-item>
 
             <!-- Tab 2: 条件选项 - 两步流程 -->
@@ -181,37 +178,12 @@ function handleCancel() {
                 </v-window-item>
                 <!-- Step 2: 选项选择 -->
                 <v-window-item :value="2" style="height: 100%;">
-                  <v-row style="height: 100%; margin: 0;">
-                    <v-col :cols="selectedOption?.type === 'field' ? 8 : 12" style="height: 100%; padding-right: 8px;">
-                      <material-panel
-                        @select_option="selectedOption = $event"
-                      />
-                    </v-col>
-                    <v-col v-if="selectedOption?.type === 'field'" cols="4" style="height: 100%; border-left: 1px solid #e0e0e0; padding-left: 12px; overflow-y: auto;">
-                      <div style="padding-top: 12px;">
-                        <h4 style="margin-bottom: 16px; font-size: 14px;">字体设置</h4>
-                        <v-select
-                          v-model="fontFamily"
-                          :items="fontFamilies"
-                          label="字体"
-                          density="compact"
-                          style="margin-bottom: 12px;"
-                        ></v-select>
-                        <v-text-field
-                          v-model.number="fontSize"
-                          label="字号"
-                          type="number"
-                          density="compact"
-                          :min="8"
-                          :max="72"
-                        ></v-text-field>
-                      </div>
-                    </v-col>
-                  </v-row>
+                  <material-panel
+                    @select_option="selectedOption = $event;console.log('选项更新:', $event)"
+                  />
                 </v-window-item>
               </v-window>
             </v-tabs-window-item>
-            
           </v-tabs-window>
         </v-card-text>
 
