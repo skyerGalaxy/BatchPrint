@@ -1,7 +1,15 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, onMounted } from 'vue';
 import { useBPStore } from '@/stores/bpstore';
+import { getFontsList, getFontValueByName } from '@/utils/fontLoader';
 
+interface Font {
+  name: string;
+  value: string;
+  type: 'system' | 'custom';
+  file?: string;
+  url?: string;
+}
 
 const emits = defineEmits(['select_option']);
 
@@ -21,8 +29,33 @@ const selectedField = ref<string | null>(null);
 
 // icon 配置
 const size = ref(40);
-const fontFamily = ref('微软雅黑');
-const fontFamilies = ['微软雅黑', '宋体', '黑体', 'Arial', 'Times New Roman'];
+const fontFamily = ref('微软雅黑'); // 存储字体的 value
+const fontOptions = ref<Font[]>([]); // 存储完整字体信息
+const fontDisplayNames = ref<string[]>([]); // 用于显示的字体名称
+
+// 初始化时自动加载字体列表
+onMounted(async () => {
+  try {
+    fontOptions.value = await getFontsList();
+    fontDisplayNames.value = fontOptions.value.map(f => f.name);
+    // 设置默认字体
+    if (fontOptions.value.length > 0) {
+      fontFamily.value = fontOptions.value[0].value;
+    }
+  } catch (error) {
+    console.error('加载字体列表失败:', error);
+    // 使用默认字体列表
+    fontOptions.value = [
+      { name: '微软雅黑', value: '微软雅黑', type: 'system' },
+      { name: '宋体', value: '宋体', type: 'system' },
+      { name: '黑体', value: '黑体', type: 'system' },
+      { name: 'Arial', value: 'Arial', type: 'system' },
+      { name: 'Times New Roman', value: 'Times New Roman', type: 'system' },
+    ];
+    fontDisplayNames.value = fontOptions.value.map(f => f.name);
+    fontFamily.value = fontOptions.value[0].value;
+  }
+});
 
 
 function selectImage(type: 'signature' | 'seal', index: number) {
@@ -35,11 +68,17 @@ function selectImage(type: 'signature' | 'seal', index: number) {
   });
 }
 
-function selectField(fieldName: string | null = null) {
+async function selectField(fieldName: string | null = null) {
+  // 如果通过字体名称选择,需要转换为 value
+  let fontValue = fontFamily.value;
+  if (fontDisplayNames.value.includes(fontFamily.value)) {
+    fontValue = await getFontValueByName(fontFamily.value);
+  }
+
   emits('select_option', {
     type: 'field',
     fieldName: fieldName ?? selectedField.value ?? '',
-    fontFamily: fontFamily.value,
+    fontFamily: fontValue,
     size: size.value
   });
 }
@@ -79,7 +118,9 @@ function selectField(fieldName: string | null = null) {
               <h4 style="margin-bottom: 16px; font-size: 14px;">配置</h4>
               <v-select
                 v-model="fontFamily"
-                :items="fontFamilies"
+                :items="fontOptions"
+                item-title="name"
+                item-value="value"
                 label="字体"
                 density="compact"
                 style="margin-bottom: 12px;"

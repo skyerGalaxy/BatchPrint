@@ -33,6 +33,8 @@ export const useBPStore = defineStore("bpstore", () => {
   const imageList_seal = ref<string[]>([]);
   let settingsStore: Store | null = null;
 
+  const excelContent = ref<any[][]>([]); 
+
   const iconList = ref<{}[]>([]);
 
 
@@ -99,6 +101,7 @@ export const useBPStore = defineStore("bpstore", () => {
     imageList_signature,
     imageList_seal,
     iconList,
+    excelContent,
     addRegularPointer, 
     addConditionalPointer, 
     removePointer,

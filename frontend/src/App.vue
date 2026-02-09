@@ -65,7 +65,7 @@
         <v-divider class="mt-1"></v-divider>
         <div class="mt-3">
           <v-chip
-            v-for="fieldName in useBPStoreInstance.fieldNames"
+            v-for="fieldName in bpStore.fieldNames"
             :key="fieldName"
             class="ma-1"
             color="primary"
@@ -96,7 +96,7 @@ import SettingsDialog from './components/global/SettingsDialog.vue';
 import LibraryPanel from './components/global/libraryPanel.vue';
 
 const pdfSrc = ref<string>('');
-const useBPStoreInstance = useBPStore();
+const bpStore = useBPStore();
 
 const settingsDialog = ref<InstanceType<typeof SettingsDialog> | null>(null);
 const libraryPanel = ref<InstanceType<typeof LibraryPanel> | null>(null);
@@ -121,8 +121,10 @@ const handleExcelChange = async (event: Event) => {
     const formData = new FormData()
     formData.append('file', file)
     const res = await axios.post('http://localhost:8000/get_excel_headers', formData)
-    useBPStoreInstance.fieldNames = res.data.headers
-    console.log('Excel file loaded:', useBPStoreInstance.fieldNames)
+    bpStore.fieldNames = res.data.headers
+    bpStore.excelContent = res.data.content
+    console.log('Excel file loaded:', bpStore.fieldNames)
+    console.log('Excel content loaded:', bpStore.excelContent)
   } else {
     alert('请选择有效的Excel文件')
   }
