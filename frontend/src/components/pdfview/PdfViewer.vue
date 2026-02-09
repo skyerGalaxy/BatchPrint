@@ -25,6 +25,7 @@ import { ref, onMounted, watch, nextTick } from "vue";
 import { useBPStore } from '@/stores/bpstore';
 import LocationDialog from "./LocationDialog.vue";
 import { loadCustomFonts } from '@/utils/fontLoader';
+import { fi } from "vuetify/locale";
 
 
 PDFJS.GlobalWorkerOptions.workerSrc = new URL(
@@ -262,18 +263,20 @@ function onCanvasMouseMove(e: MouseEvent, pageIndex: number) {
   const pageIcons = icons.value.filter(icon => icon.pageIndex === pageIndex);
   
   let found = false;
+  let newHoveredIcon: StoreIcon | null = null;
   for (const icon of pageIcons) {
     if (isPointInIcon(coords, icon)) {
-      hoveredIcon.value = icon;
+      newHoveredIcon = icon;
       found = true;
       break;
     }
   }
-  if (!found) {
-    hoveredIcon.value = null;
+  
+  // 仅当悬停图标改变时才重绘
+  if (hoveredIcon.value !== newHoveredIcon) {
+    hoveredIcon.value = newHoveredIcon;
+    redrawIcons(pageIndex);
   }
-
-  redrawIcons(pageIndex);
 }
 
 // Canvas 鼠标离开事件
@@ -364,7 +367,93 @@ function redrawAllPages() {
   }
 }
 
+// 辅助函数：获取字段值
+function getFieldValue(fieldName: string): string {
+  if (!fieldName || !bpStore.fieldNames || !bpStore.excelContent?.length) {
+    return '';
+  }
+  const columnIndex = bpStore.fieldNames.indexOf(fieldName);
+  if (columnIndex === -1) return '';
+  return String(bpStore.excelContent[0][columnIndex] || '');
+}
 
+// 辅助函数：绘制字段文本
+function drawFieldText(ctx: CanvasRenderingContext2D, fieldName: string, fontFamily: string, fontSize: number, x: number, y: number): void {
+  const fieldValue = getFieldValue(fieldName);
+  ctx.fillStyle = "#000";
+  ctx.font = `${fontSize}px ${fontFamily}`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(fieldValue, x, y);
+}
+
+// 辅助函数：绘制图片
+function drawImageIcon(ctx: CanvasRenderingContext2D, imgSrc: string, x: number, y: number, size: number, pageIndex: number): void {
+  if (!imgSrc) return;
+  
+  let img = imageCache.get(imgSrc);
+  if (!img) {
+    img = new Image();
+    img.src = imgSrc;
+    imageCache.set(imgSrc, img);
+    // 仅在首次加载完成时重绘该页（避免多个图片加载时重复重绘）
+    img.onload = () => {
+      redrawIcons(pageIndex);
+    };
+  }
+  
+  if (img.complete && img.width && img.height) {
+    const imgRatio = img.width / img.height;
+    const drawWidth = imgRatio > 1 ? size : size * imgRatio;
+    const drawHeight = imgRatio > 1 ? size / imgRatio : size;
+    ctx.drawImage(img, x - drawWidth / 2, y - drawHeight / 2, drawWidth, drawHeight);
+  }
+}
+
+// 辅助函数：检查条件是否满足
+function checkConditions(conditions: IconCondition[] | undefined, matchMode: string | undefined): boolean {
+  if (!conditions?.length) return true;
+  
+  const checkCondition = (cond: IconCondition): boolean => {
+    const fieldValue = getFieldValue(cond.field || '');
+    switch (cond.op) {
+      case '等于': return fieldValue === cond.value;
+      case '不等于': return fieldValue !== cond.value;
+      case '包含': return fieldValue.includes(cond.value);
+      case '不包含': return !fieldValue.includes(cond.value);
+      case '为空': return !fieldValue;
+      case '不为空': return !!fieldValue;
+      default: return false;
+    }
+  };
+  
+  return matchMode === '所有' ? conditions.every(checkCondition) : conditions.some(checkCondition);
+}
+
+// 辅助函数：绘制删除和缩放按钮
+function drawHoverButtons(ctx: CanvasRenderingContext2D, x: number, y: number, size: number): void {
+  const halfSize = size / 2;
+  const buttonRadius = 9;
+  
+  // 删除按钮
+  ctx.fillStyle = "#ff4444";
+  ctx.beginPath();
+  ctx.arc(x - halfSize, y - halfSize, buttonRadius, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#fff";
+  ctx.font = "bold 14px Arial";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("✕", x - halfSize, y - halfSize);
+
+  // 缩放按钮
+  ctx.fillStyle = "#4444ff";
+  ctx.beginPath();
+  ctx.arc(x + halfSize, y + halfSize, buttonRadius, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#fff";
+  ctx.fillText("⇲", x + halfSize, y + halfSize);
+}
 
 // 绘制单个 icon
 function drawIcon(ctx: CanvasRenderingContext2D, icon: StoreIcon, scaleX: number, scaleY: number, isSelected: boolean, isHovered: boolean) {
@@ -372,220 +461,23 @@ function drawIcon(ctx: CanvasRenderingContext2D, icon: StoreIcon, scaleX: number
   const y = icon.pointer.clientY;
   const size = getIconSize(icon);
 
-  if(icon.mode ==='single') {
+  // 检查是否应该绘制内容（single 模式总是绘制，conditional 模式需要检查条件）
+  const shouldDraw = icon.mode === 'single' || checkConditions(icon.conditions, icon.matchMode);
+
+  if (shouldDraw) {
+    const fontFamily = icon.option.fontFamily || '微软雅黑';
+    const fontSize = Math.max(8, Math.floor(size * 0.3));
     
-    // 根据 option 类型渲染
     if (icon.option.type === 'field') {
-      const fontFamily = icon.option.fontFamily || '微软雅黑';
-      const fieldName = icon.option.fieldName || '';
-      const fontSize = Math.max(8, Math.floor(size * 0.3));
-      
-      ctx.fillStyle = "#000";
-      ctx.font = `${fontSize}px ${fontFamily}`;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(fieldName, x, y);
+      drawFieldText(ctx, icon.option.fieldName || '', fontFamily, fontSize, x, y);
     } else if (icon.option.type === 'image') {
-      const imgSrc = icon.option.src;
-      if (imgSrc) {
-        let img = imageCache.get(imgSrc);
-        if (!img) {
-          img = new Image();
-          img.src = imgSrc;
-          imageCache.set(imgSrc, img);
-          img.onload = () => {
-            redrawIcons(icon.pageIndex);
-          };
-        }
-        if (img.complete && img.width && img.height) {
-          // 根据原图比例缩放，size 作为最长边
-          const imgRatio = img.width / img.height;
-          let drawWidth = size;
-          let drawHeight = size;
-          
-          if (imgRatio > 1) {
-            // 宽 > 高，以宽为 size，高按比例缩放
-            drawHeight = size / imgRatio;
-          } else {
-            // 高 >= 宽，以高为 size，宽按比例缩放
-            drawWidth = size * imgRatio;
-          }
-          
-          const drawX = x - drawWidth / 2;
-          const drawY = y - drawHeight / 2;
-          ctx.drawImage(img, drawX, drawY, drawWidth, drawHeight);
-        }
-      }
+      drawImageIcon(ctx, icon.option.src || '', x, y, size, icon.pageIndex);
     }
-
-  } else if(icon.mode === 'conditional') {
-    if(icon.matchMode === '所有') {
-      //遍历所有条件，返回布尔值
-      const allMatch = icon.conditions?.every(cond => {
-        const fieldValue =  '';
-        switch (cond.op) {
-          case '等于': return fieldValue === cond.value;
-          case '不等于': return fieldValue !== cond.value;
-          case '包含': return fieldValue.includes(cond.value);
-          case '不包含': return !fieldValue.includes(cond.value);
-          case '为空': return !fieldValue;
-          case '不为空': return !!fieldValue;
-          default: return false;
-        }
-      });
-      // 如果所有条件都满足，才显示图标
-      if(allMatch) {
-        // 根据 option 类型渲染
-        if (icon.option.type === 'field') {
-          const fontFamily = icon.option.fontFamily || '微软雅黑';
-          const fieldName = icon.option.fieldName || '';
-          const fontSize = Math.max(8, Math.floor(size * 0.3));
-          
-          ctx.fillStyle = "#000";
-          ctx.font = `${fontSize}px ${fontFamily}`;
-          ctx.textAlign = "center";
-          ctx.textBaseline = "middle";
-          ctx.fillText(fieldName, x, y);
-        } else if (icon.option.type === 'image') {
-          const imgSrc = icon.option.src;
-          if (imgSrc) {
-            let img = imageCache.get(imgSrc);
-            if (!img) {
-              img = new Image();
-              img.src = imgSrc;
-              imageCache.set(imgSrc, img);
-              img.onload = () => {
-                redrawIcons(icon.pageIndex);
-              };
-            }
-            if (img.complete && img.width && img.height) {
-              // 根据原图比例缩放，size 作为最长边
-              const imgRatio = img.width / img.height;
-              let drawWidth = size;
-              let drawHeight = size;
-              
-              if (imgRatio > 1) {
-                // 宽 > 高，以宽为 size，高按比例缩放
-                drawHeight = size / imgRatio;
-              } else {
-                // 高 >= 宽，以高为 size，宽按比例缩放
-                drawWidth = size * imgRatio;
-              }
-              
-              const drawX = x - drawWidth / 2;
-              const drawY = y - drawHeight / 2;
-              ctx.drawImage(img, drawX, drawY, drawWidth, drawHeight);
-            }
-          }
-        }
-      }
-
-    } else{
-        return;
-      }
-
-    } else{
-      //遍历所有条件，返回布尔值
-      const anyMatch = icon.conditions?.some(cond => {
-        const fieldValue =  '';
-        switch (cond.op) {
-          case '等于': return fieldValue === cond.value;
-          case '不等于': return fieldValue !== cond.value;
-          case '包含': return fieldValue.includes(cond.value);
-          case '不包含': return !fieldValue.includes(cond.value);
-          case '为空': return !fieldValue;
-          case '不为空': return !!fieldValue;
-          default: return false;
-        }
-      });
-      // 如果任一条件满足，才显示图标
-      if(anyMatch) {
-        // 根据 option 类型渲染
-        if (icon.option.type === 'field') {
-          const fontFamily = icon.option.fontFamily || '微软雅黑';
-          const fieldName = icon.option.fieldName || '';
-          const fontSize = Math.max(8, Math.floor(size * 0.3));
-          
-          ctx.fillStyle = "#000";
-          ctx.font = `${fontSize}px ${fontFamily}`;
-          ctx.textAlign = "center";
-          ctx.textBaseline = "middle";
-          ctx.fillText(fieldName, x, y);
-        } else if (icon.option.type === 'image') {
-          const imgSrc = icon.option.src;
-          if (imgSrc) {
-            let img = imageCache.get(imgSrc);
-            if (!img) {
-              img = new Image();
-              img.src = imgSrc;
-              imageCache.set(imgSrc, img);
-              img.onload = () => {
-                redrawIcons(icon.pageIndex);
-              };
-            }
-            if (img.complete && img.width && img.height) {
-              // 根据原图比例缩放，size 作为最长边
-              const imgRatio = img.width / img.height;
-              let drawWidth = size;
-              let drawHeight = size;
-              
-              if (imgRatio > 1) {
-                // 宽 > 高，以宽为 size，高按比例缩放
-                drawHeight = size / imgRatio;
-              } else {
-                // 高 >= 宽，以高为 size，宽按比例缩放
-                drawWidth = size * imgRatio;
-              }
-              
-              const drawX = x - drawWidth / 2;
-              const drawY = y - drawHeight / 2;
-              ctx.drawImage(img, drawX, drawY, drawWidth, drawHeight);
-            }
-          }
-        }
-      }
-    }
-
+  }
 
   // 只在悬停时显示删除和缩放按钮
   if (isHovered) {
-    const halfSize = size / 2;
-    
-    // 绘制左上角删除按钮
-    const deleteX = x - halfSize;
-    const deleteY = y - halfSize;
-    const deleteSize = 18;
-    
-    // 删除按钮背景（圆形）
-    ctx.fillStyle = "#ff4444";
-    ctx.beginPath();
-    ctx.arc(deleteX, deleteY, deleteSize / 2, 0, Math.PI * 2);
-    ctx.fill();
-    
-    // 删除符号
-    ctx.fillStyle = "#fff";
-    ctx.font = "bold 14px Arial";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText("✕", deleteX, deleteY);
-
-    // 绘制右下角缩放按钮
-    const resizeX = x + halfSize;
-    const resizeY = y + halfSize;
-    const resizeSize = 18;
-    
-    // 缩放按钮背景（圆形）
-    ctx.fillStyle = "#4444ff";
-    ctx.beginPath();
-    ctx.arc(resizeX, resizeY, resizeSize / 2, 0, Math.PI * 2);
-    ctx.fill();
-    
-    // 缩放符号（斜双向箭头）
-    ctx.fillStyle = "#fff";
-    ctx.font = "bold 14px Arial";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText("⇲", resizeX, resizeY);
+    drawHoverButtons(ctx, x, y, size);
   }
 }
 
