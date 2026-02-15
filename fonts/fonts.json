@@ -36,6 +36,12 @@
       "value": "手写体2",
       "type": "custom",
       "file": "手写体2.ttf"
+    },
+    {
+      "name":"手写体3",
+      "value":"手写体3",
+      "type": "custom",
+      "file": "手写体3.ttf"
     }
   ]
 }

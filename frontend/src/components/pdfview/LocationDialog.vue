@@ -78,7 +78,7 @@ function handleConfirm() {
       iconId.value++;
     }
 
-    console.log('当前图标列表:', bpStore.iconList);
+    console.log('iconlist:', bpStore.iconList);
 
     //重置所有状态
     tab.value = '1';

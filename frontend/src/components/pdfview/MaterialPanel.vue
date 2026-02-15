@@ -116,7 +116,7 @@ async function selectField(fieldName: string | null = null) {
           <v-col style="height: 100%; border-left: 1px solid #e0e0e0; padding-left: 12px; overflow-y: auto;">
             <div style="padding-top: 12px;">
               <h4 style="margin-bottom: 16px; font-size: 14px;">配置</h4>
-              <v-select
+                <v-select
                 v-model="fontFamily"
                 :items="fontOptions"
                 item-title="name"
@@ -125,7 +125,7 @@ async function selectField(fieldName: string | null = null) {
                 density="compact"
                 style="margin-bottom: 12px;"
                 @update:model-value="()=>selectField()"
-              ></v-select>
+                ></v-select>
               <v-text-field
                 v-model.number="size"
                 label="大小"
@@ -135,6 +135,12 @@ async function selectField(fieldName: string | null = null) {
                 :max="200"
                 @update:model-value="()=>selectField()"
               ></v-text-field>
+              <div style="margin-bottom: 12px;">
+                <p style="font-size: 12px; color: #666; margin-bottom: 8px;">预览</p>
+                <div style="height: 60px; border: 1px solid #e0e0e0; border-radius: 4px; padding: 8px; display: flex; align-items: center; background-color: #fafafa; overflow: hidden;">
+                  <span :style="{ fontFamily: fontFamily, fontSize:  '44px', color: '#000' }">预览文字</span>
+                </div>
+              </div>
             </div>
           </v-col>
         </v-row>

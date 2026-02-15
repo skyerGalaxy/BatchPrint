@@ -43,6 +43,7 @@
 
     <v-navigation-drawer
       width="25%"
+      location="right"
       style ="min-width: 220px; max-width: 300px"
     >
       <v-list nav>
@@ -74,6 +75,17 @@
           >
             {{ fieldName }}
           </v-chip>
+        </div>
+        <v-divider class="mt-5"></v-divider>
+        <div class="d-flex justify-center mt-8">
+            <v-btn
+            class="ma-2"
+            color="primary"
+            block
+            @click="generateBatchPDF"
+            >
+            生成PDF
+            </v-btn>
         </div>
       </v-list>
     </v-navigation-drawer>
@@ -107,6 +119,7 @@ const handleFileChange = async (event: Event) => {
   console.log(file);
   if (file && file.type === 'application/pdf') {
     pdfSrc.value = URL.createObjectURL(file);
+    bpStore.pdfSrc = pdfSrc.value;
     console.log('PDF file loaded:', pdfSrc.value);
   } else {
     alert('请选择有效的PDF文件');
@@ -116,6 +129,7 @@ const handleFileChange = async (event: Event) => {
 const handleExcelChange = async (event: Event) => {
   const fileInput = event.target as HTMLInputElement
   const file = fileInput.files ? fileInput.files[0] : null
+  bpStore.excelSrc = file ? URL.createObjectURL(file) : ''
 
   if (file && (file.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || file.type === 'application/vnd.ms-excel')) {
     const formData = new FormData()
@@ -127,6 +141,55 @@ const handleExcelChange = async (event: Event) => {
     console.log('Excel content loaded:', bpStore.excelContent)
   } else {
     alert('请选择有效的Excel文件')
+  }
+}
+
+const generateBatchPDF = async () => {
+  if (!bpStore.pdfSrc) {
+    alert('请先选择PDF模板')
+    return
+  }
+  if (!bpStore.excelSrc) {
+    alert('请先选择Excel数据文件')
+    return
+  }
+
+  try {
+    // 将pdfSrc和excelSrc转换为Base64或者直接发送二进制数据
+    const pdfResponse = await fetch(bpStore.pdfSrc)
+    const pdfBlob = await pdfResponse.blob()
+    
+    const excelResponse = await fetch(bpStore.excelSrc)
+    const excelBlob = await excelResponse.blob()
+
+    const formData = new FormData()
+    formData.append('pdf_file', pdfBlob, 'template.pdf')
+    formData.append('excel_file', excelBlob, 'data.xlsx')
+    formData.append('icon_list', JSON.stringify(bpStore.iconList))
+
+    console.log('发送的iconList:', bpStore.iconList)
+
+    const res = await axios.post('http://localhost:8000/generate_batch_pdf', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      },
+      responseType: 'blob'
+    })
+
+    // 处理ZIP文件下载
+    const url = window.URL.createObjectURL(new Blob([res.data]))
+    const link = document.createElement('a')
+    link.href = url
+    link.setAttribute('download', 'batch_pdfs.zip')
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    window.URL.revokeObjectURL(url)
+    
+    alert('PDF批量生成成功！文件已下载')
+  } catch (error) {
+    console.error('生成PDF失败:', error)
+    alert('生成PDF出错，请查看浏览器控制台')
   }
 }
 </script>

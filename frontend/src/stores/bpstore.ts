@@ -31,11 +31,13 @@ export const useBPStore = defineStore("bpstore", () => {
   const imagePath = ref<string>("");
   const imageList_signature = ref<string[]>([]);
   const imageList_seal = ref<string[]>([]);
-  let settingsStore: Store | null = null;
 
   const excelContent = ref<any[][]>([]); 
 
   const iconList = ref<{}[]>([]);
+
+  const pdfSrc = ref<string>("");
+  const excelSrc = ref<string>(""); 
 
 
   function addRegularPointer(pageIndex: number, x: number, y: number, path: string, size: number) {
@@ -72,7 +74,6 @@ export const useBPStore = defineStore("bpstore", () => {
   async function initializeApp() {
     try {
       const store = await Store.load('settings.json');
-      settingsStore = store;
       
       let path = await store.get('image_storage_path') as string | null;
 
@@ -102,6 +103,8 @@ export const useBPStore = defineStore("bpstore", () => {
     imageList_seal,
     iconList,
     excelContent,
+    pdfSrc,
+    excelSrc,
     addRegularPointer, 
     addConditionalPointer, 
     removePointer,
