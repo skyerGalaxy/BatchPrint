@@ -169,14 +169,14 @@
 
     onMounted(async () => {
         try {
-            imagePath.value = bpStore.imagePath || '';
+            imagePath.value = bpStore.dataPath || '';
             await loadImages();
         } catch (error) {
             console.error('初始化失败:', error);
         }
     });
 
-    watch(() => bpStore.imagePath, async (newPath) => {
+    watch(() => bpStore.dataPath, async (newPath) => {
         imagePath.value = newPath || '';
         await loadImages();
     });

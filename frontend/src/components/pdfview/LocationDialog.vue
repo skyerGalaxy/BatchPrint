@@ -59,8 +59,8 @@ function removeCondition(index: number) {
 function handleConfirm() {
 
   const result = tab.value === '1'
-    ? {id: iconId.value, pageIndex: props.pageIndex, pointer: props.pointer, mode: 'single', option: selectedOption.value, size: (selectedOption.value as any)?.size }
-    : {id: iconId.value, pageIndex: props.pageIndex, pointer: props.pointer, mode: 'conditional', conditions: conditions.value, matchMode: matchMode.value, option: selectedOption.value, size: (selectedOption.value as any)?.size };
+    ? {id: iconId.value, pageIndex: props.pageIndex, pointer: props.pointer, mode: 'single', option: selectedOption.value, size: (selectedOption.value as any)?.size, scale: bpStore.pdfScale }
+    : {id: iconId.value, pageIndex: props.pageIndex, pointer: props.pointer, mode: 'conditional', conditions: conditions.value, matchMode: matchMode.value, option: selectedOption.value, size: (selectedOption.value as any)?.size, scale: bpStore.pdfScale };
 
     console.log('最终结果:', result);
     if(!result.option) {
@@ -74,7 +74,7 @@ function handleConfirm() {
     }
 
     bpStore.iconList.push(result);
-    if (bpStore.iconList.length = iconId.value) {
+    if (bpStore.iconList.length === iconId.value) {
       iconId.value++;
     }
 

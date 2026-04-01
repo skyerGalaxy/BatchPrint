@@ -28,7 +28,7 @@ type PointerType = RegularPointer | ConditionalPointer;
 export const useBPStore = defineStore("bpstore", () => {
   const fieldNames = ref<string[]>([]);
   const pointers = ref<PointerType[]>([]);
-  const imagePath = ref<string>("");
+  const dataPath = ref<string>("");
   const imageList_signature = ref<string[]>([]);
   const imageList_seal = ref<string[]>([]);
 
@@ -38,6 +38,9 @@ export const useBPStore = defineStore("bpstore", () => {
 
   const pdfSrc = ref<string>("");
   const excelSrc = ref<string>(""); 
+  const pdfFile = ref<File | null>(null);
+  const excelFile = ref<File | null>(null);
+  const pdfScale = ref<number>(2);
 
 
   function addRegularPointer(pageIndex: number, x: number, y: number, path: string, size: number) {
@@ -75,19 +78,20 @@ export const useBPStore = defineStore("bpstore", () => {
     try {
       const store = await Store.load('settings.json');
       
-      let path = await store.get('image_storage_path') as string | null;
+      let path = await store.get('data_storage_path') as string | null;
 
       if (!path) {
         path = await appLocalDataDir();
-        await store.set('image_storage_path', path);
+        await store.set('data_storage_path', path);
         
         await Promise.all([
           mkdir(`${path}/sealImg`, { recursive: true }),
           mkdir(`${path}/signImg`, { recursive: true }),
+          mkdir(`${path}/generatePdf`, { recursive: true }),
         ]);
       }
       
-      imagePath.value = path;
+      dataPath.value = path;
     } catch (error) {
       console.error('Failed to initialize app:', error);
     }
@@ -98,13 +102,16 @@ export const useBPStore = defineStore("bpstore", () => {
   return { 
     fieldNames, 
     pointers, 
-    imagePath,
+    dataPath,
     imageList_signature,
     imageList_seal,
     iconList,
     excelContent,
     pdfSrc,
     excelSrc,
+    pdfFile,
+    excelFile,
+    pdfScale,
     addRegularPointer, 
     addConditionalPointer, 
     removePointer,

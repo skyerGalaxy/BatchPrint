@@ -9,7 +9,7 @@
 
     const dialog = ref(false)
     const selectedItemIndex = ref(0)
-    const imagePath = ref('')
+    const dataPath = ref('')
     let settingsStore: Store | null = null
     const settingsItems = [
         { title: '通用设置', icon: 'mdi-cog' },
@@ -30,11 +30,11 @@
             const result = await open({
                 directory: true,
                 multiple: false,
-                title: '选择图片存储路径'
+                title: '选择数据存储路径'
             });
             if (result) {
                 // 如果选择的路径与当前路径相同，直接返回
-                if (result === bpStore.imagePath) {
+                if (result === bpStore.dataPath) {
                     console.info('选择的路径与当前路径相同');
                     return;
                 }
@@ -60,14 +60,14 @@
     }
 
     // 公共函数：更新路径到所有存储位置
-    async function updateImagePath(newPath: string) {
-        imagePath.value = newPath;
+    async function updateDataPath(newPath: string) {
+        bpStore.dataPath = newPath;
         if (!settingsStore) {
             settingsStore = await Store.load('settings.json');
         }
-        await settingsStore.set('image_storage_path', newPath);
+        await settingsStore.set('data_storage_path', newPath);
         await settingsStore.save();
-        bpStore.imagePath = newPath;
+        bpStore.dataPath = newPath;
     }
 
     async function createFolder(path: string) {
@@ -75,8 +75,9 @@
             await Promise.all([
                 mkdir(`${path}/sealImg`, { recursive: true }),
                 mkdir(`${path}/signImg`, { recursive: true }),
+                mkdir(`${path}/generatePdf`, { recursive: true }),
             ]);
-            await updateImagePath(path);
+            await updateDataPath(path);
             isMovingDialog.value = false;
             console.log('文件夹创建并路径已更新');
         } catch (error) {
@@ -87,12 +88,12 @@
     async function moveFolders(newPath: string) {
         try {
             const result = await invoke('move_folder_with_extra', {
-                src: bpStore.imagePath,
+                src: bpStore.dataPath,
                 dest: newPath
             });
             console.log('移动结果:', result);
             
-            await updateImagePath(newPath);
+            await updateDataPath(newPath);
             isMovingDialog.value = false;
             console.log('文件夹移动成功');
         } catch (error) {
@@ -103,9 +104,9 @@
     async function initStore() {
         try {
             settingsStore = await Store.load('settings.json')
-            const val = await settingsStore.get<string>('image_storage_path')
+            const val = await settingsStore.get<string>('data_storage_path')
             if (typeof val === 'string') {
-                imagePath.value = val
+                dataPath.value = val
             }
         } catch (e) {
             console.warn('初始化设置存储失败:', e)
@@ -157,13 +158,13 @@
 
                         <v-window-item :value="1">
                             <h2 class="text-h6 mb-4">存储与路径</h2>
-                            <p class="text-subtitle-1 mb-2">图片存储路径:</p>
+                            <p class="text-subtitle-1 mb-2">数据存储路径:</p>
                             <v-text-field
                                 label="当前路径"
                                 density="compact"
                                 readonly
                                 append-icon="mdi-folder-open"
-                                v-model="imagePath"
+                                v-model="bpStore.dataPath"
                             />
                             <v-btn color="success" class="mt-2" @click="openPathDialog">更改路径</v-btn>
                             <v-alert type="info" class="mt-4">

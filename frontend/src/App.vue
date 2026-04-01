@@ -103,6 +103,7 @@
 import { ref } from 'vue';
 import { useBPStore } from './stores/bpstore';
 import axios from 'axios';
+import { open } from '@tauri-apps/plugin-dialog';
 import PdfViewer from './components/pdfview/PdfViewer.vue';
 import SettingsDialog from './components/global/SettingsDialog.vue';
 import LibraryPanel from './components/global/libraryPanel.vue';
@@ -120,6 +121,7 @@ const handleFileChange = async (event: Event) => {
   if (file && file.type === 'application/pdf') {
     pdfSrc.value = URL.createObjectURL(file);
     bpStore.pdfSrc = pdfSrc.value;
+    bpStore.pdfFile = file;
     console.log('PDF file loaded:', pdfSrc.value);
   } else {
     alert('请选择有效的PDF文件');
@@ -130,6 +132,7 @@ const handleExcelChange = async (event: Event) => {
   const fileInput = event.target as HTMLInputElement
   const file = fileInput.files ? fileInput.files[0] : null
   bpStore.excelSrc = file ? URL.createObjectURL(file) : ''
+  bpStore.excelFile = file
 
   if (file && (file.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || file.type === 'application/vnd.ms-excel')) {
     const formData = new FormData()
@@ -145,48 +148,39 @@ const handleExcelChange = async (event: Event) => {
 }
 
 const generateBatchPDF = async () => {
-  if (!bpStore.pdfSrc) {
+  if (!bpStore.pdfFile) {
     alert('请先选择PDF模板')
     return
   }
-  if (!bpStore.excelSrc) {
+  if (!bpStore.excelFile) {
     alert('请先选择Excel数据文件')
     return
   }
 
   try {
-    // 将pdfSrc和excelSrc转换为Base64或者直接发送二进制数据
-    const pdfResponse = await fetch(bpStore.pdfSrc)
-    const pdfBlob = await pdfResponse.blob()
-    
-    const excelResponse = await fetch(bpStore.excelSrc)
-    const excelBlob = await excelResponse.blob()
-
+    // 直接传递文件对象
     const formData = new FormData()
-    formData.append('pdf_file', pdfBlob, 'template.pdf')
-    formData.append('excel_file', excelBlob, 'data.xlsx')
-    formData.append('icon_list', JSON.stringify(bpStore.iconList))
 
-    console.log('发送的iconList:', bpStore.iconList)
+    formData.append('pdf_file', bpStore.pdfFile)
+    formData.append('excel_file', bpStore.excelFile)
+    formData.append('path', bpStore.dataPath || '')
+    // formData.append('icon_list', JSON.stringify(bpStore.iconList))
+    // formData.append('pdf_scale', bpStore.pdfScale.toString())
 
-    const res = await axios.post('http://localhost:8000/generate_batch_pdf', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data'
-      },
-      responseType: 'blob'
-    })
-
-    // 处理ZIP文件下载
-    const url = window.URL.createObjectURL(new Blob([res.data]))
-    const link = document.createElement('a')
-    link.href = url
-    link.setAttribute('download', 'batch_pdfs.zip')
-    document.body.appendChild(link)
-    link.click()
-    link.remove()
-    window.URL.revokeObjectURL(url)
+    // console.log('发送的iconList:', bpStore.iconList)
+    // console.log('发送的pdf文件:', bpStore.pdfFile)
+    // console.log('发送的excel文件:', bpStore.excelFile)
     
-    alert('PDF批量生成成功！文件已下载')
+    // 正确查看 FormData 内容的方法
+    // console.log('FormData内容:')
+    // for (let [key, value] of formData.entries()) {
+    //   console.log(key, value)
+    // }
+
+    const res = await axios.post('http://localhost:8000/generate_batch_pdf', formData)
+
+    console.log('后端响应:', res.data)
+    alert('PDF批量生成成功！' + res.data.message)
   } catch (error) {
     console.error('生成PDF失败:', error)
     alert('生成PDF出错，请查看浏览器控制台')

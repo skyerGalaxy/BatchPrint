@@ -485,6 +485,7 @@ function drawIcon(ctx: CanvasRenderingContext2D, icon: StoreIcon, scaleX: number
 onMounted(async () => {
   // 先加载自定义字体
   await loadCustomFonts();
+  bpStore.pdfScale = pdfScale.value;
   
   // 然后加载 PDF
   loadFile(props.pdfSrc);

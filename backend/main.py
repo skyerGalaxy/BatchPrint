@@ -1,15 +1,21 @@
-from fastapi import FastAPI, UploadFile, File, Request
+from importlib.readers import FileReader
+from fastapi import FastAPI, UploadFile, File, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 import pandas as pd
 import json
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, unquote, urlparse
 import io
-import zipfile
 from PIL import Image
-import base64
-# import batch_print
+import requests
+import tempfile
+import os
+import shutil
+from pypdf import PdfReader, PdfWriter
+from reportlab.pdfgen import canvas
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 
 app = FastAPI()
 
@@ -28,6 +34,52 @@ def get_fonts_dir():
     current_file = Path(__file__)
     project_root = current_file.parent.parent
     return project_root / "fonts"
+
+def register_custom_fonts():
+    fonts_dir = get_fonts_dir()
+    fonts_json = fonts_dir / "fonts.json"
+
+    if not fonts_json.exists():
+        return
+
+    try:
+        with open(fonts_json, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as error:
+        print(f"读取字体配置失败: {error}")
+        return
+
+    system_font_map = {
+        "微软雅黑": "msyh.ttc",
+        "宋体": "simsun.ttc",
+        "黑体": "simhei.ttc",
+    }
+
+    if os.name == "nt":
+        windows_fonts_dir = Path(os.environ.get("WINDIR", "C:\\Windows")) / "Fonts"
+        for font in data.get("fonts", []):
+            font_name = font.get("value") or font.get("name")
+            font_type = font.get("type")
+            
+            if font_name in pdfmetrics.getRegisteredFontNames():
+                continue
+            
+            if font_type == "custom":
+                font_path = fonts_dir / font.get("file", "")
+                if font_path.exists():
+                    try:
+                        pdfmetrics.registerFont(TTFont(font_name, str(font_path)))
+                    except Exception as error:
+                        print(f"注册自定义字体失败: {font_name}, {error}")
+            
+            elif font_type == "system" and font_name in system_font_map:
+                font_file = system_font_map[font_name]
+                font_path = windows_fonts_dir / font_file
+                if font_path.exists():
+                    try:
+                        pdfmetrics.registerFont(TTFont(font_name, str(font_path)))
+                    except Exception as error:
+                        print(f"注册系统字体失败: {font_name}, {error}")
 
 @app.get("/api/fonts")
 async def get_fonts_list(request: Request):
@@ -54,7 +106,6 @@ async def get_fonts_list(request: Request):
 @app.get("/api/fonts/file/{filename}")
 async def get_font_file(filename: str):
     """获取字体文件(用于前端加载)"""
-    from urllib.parse import unquote
     # 解码 URL 编码的文件名
     decoded_filename = unquote(filename)
     
@@ -70,6 +121,13 @@ async def get_font_file(filename: str):
         media_type="application/octet-stream",
         filename=decoded_filename
     )
+
+def resolve_local_path_from_url(url: str) -> str:
+    parsed = urlparse(url)
+    raw_path = unquote(parsed.path)
+    if os.name == "nt" and raw_path.startswith("/") and len(raw_path) > 2 and raw_path[2] == ":":
+        return raw_path[1:]
+    return raw_path
 
 @app.post("/save_config")
 async def save_config(data: dict):
@@ -90,227 +148,319 @@ async def get_excel_headers(file: UploadFile = File(...)):
     content = df.values.tolist()
     return {"headers": headers, "content": content}
 
-
 @app.post("/generate_batch_pdf")
 async def generate_batch_pdf(
     pdf_file: UploadFile = File(...),
     excel_file: UploadFile = File(...),
-    icon_list: str = ""
+    path: str = Form(...),
+    # icon_list: str = Form(default="[]"),
+    pdf_scale: float = Form(default=2.0),
 ):
-    """
-    批量生成PDF
+    icon_list = [
+        {
+            "id": 1,
+            "pageIndex": 1,
+            "pointer": {
+                "clientX": 858.1222222222221,
+                "clientY": 415.4288379858093
+            },
+            "mode": "single",
+            "option": {
+                "type": "field",
+                "fieldName": "网址",
+                "fontFamily": "微软雅黑",
+                "size": 150
+            },
+            "size": 150,
+        },
+        {
+            "id": 2,
+            "pageIndex": 1,
+            "pointer": {
+                "clientX": 815.8111111111111,
+                "clientY": 594.0367778841668
+            },
+            "mode": "single",
+            "option": {
+                "type": "image",
+                "src": "http://asset.localhost/E%3A%5C%E6%96%B0%E5%BB%BA%E6%96%87%E4%BB%B6%E5%A4%B9%5C%E5%9B%BE%E7%89%87%2FsignImg%2Fmiaoshan-32646987338686e781.83979967.png"
+            },
+            "size": 191.1159948873192,
+        },
+        {
+            "id": 3,
+            "pageIndex": 1,
+            "pointer": {
+                "clientX": 649.2111111111111,
+                "clientY": 739.5691733569025
+            },
+            "mode": "conditional",
+            "conditions": [
+                {
+                    "id": 1772853244334,
+                    "field": "账号",
+                    "op": "等于",
+                    "value": "15938844561"
+                },
+                {
+                    "id": 1772853272633,
+                    "field": "网址",
+                    "op": "包含",
+                    "value": "http"
+                }
+            ],
+            "matchMode": "所有",
+            "option": {
+                "type": "field",
+                "fieldName": "密码",
+                "fontFamily": "手写体1",
+                "size": 140
+            },
+            "size": 140,
+        },
+        {
+            "id": 4,
+            "pageIndex": 1,
+            "pointer": {
+                "clientX": 749.6999999999999,
+                "clientY": 862.6101986202156
+            },
+            "mode": "conditional",
+            "conditions": [
+                {
+                    "id": 1772853288118,
+                    "field": "账号",
+                    "op": "等于",
+                    "value": "159"
+                },
+                {
+                    "id": 1772853315855,
+                    "field": "网址",
+                    "op": "包含",
+                    "value": "http"
+                }
+            ],
+            "matchMode": "任一",
+            "option": {
+                "type": "image",
+                "src": "http://asset.localhost/E%3A%5C%E6%96%B0%E5%BB%BA%E6%96%87%E4%BB%B6%E5%A4%B9%5C%E5%9B%BE%E7%89%87%2FsignImg%2F%E4%B8%80%E4%B8%AA%E6%9C%89%E8%B6%A3%E5%AE%9E%E7%94%A8%E7%A7%91%E6%8A%80%E6%9C%89%E9%99%90%E5%85%AC%E5%8F%B8_7237.png"
+            },
+            "size": 173.38231783221443,
+        }
+    ]
     
-    参数:
-    - pdf_file: PDF模板文件
-    - excel_file: Excel数据文件
-    - icon_list: JSON格式的图标列表
-      每个icon包含:
-      - id: 图标ID
-      - matchMode: "single"表示单一模式，其他值表示条件模式
-      - option: {type: "field"或"image", ...}
-      - pageIndex: 页码
-      - pointer: {clientX, clientY} 坐标
-      - conditions: 条件数组（仅条件模式有）
-    """
-    try:
-        from PyPDF2 import PdfReader, PdfWriter
-        from reportlab.pdfgen import canvas
-        import requests
-        import tempfile
-        import os
-        
-        # 读取Excel数据
-        df = pd.read_excel(excel_file.file)
-        excel_data = df.to_dict('records')
-        
-        # 解析icon_list
-        icon_list_data = json.loads(icon_list) if icon_list else []
-        
-        print(f"接收到的icon_list: {json.dumps(icon_list_data, ensure_ascii=False, indent=2)}")
-        print(f"Excel数据行数: {len(excel_data)}")
-        
-        # 读取PDF模板
-        pdf_content = await pdf_file.read()
-        pdf_reader = PdfReader(io.BytesIO(pdf_content))
-        
-        # 获取PDF页面尺寸
-        first_page = pdf_reader.pages[0]
-        page_width = float(first_page.mediabox.width)
-        page_height = float(first_page.mediabox.height)
-        
-        print(f"PDF尺寸: {page_width} x {page_height}")
-        
-        # 生成输出文件的ZIP
-        output_zip = io.BytesIO()
-        
-        # 创建临时目录存储字体和图片
-        temp_dir = tempfile.mkdtemp()
-        
-        try:
-            with zipfile.ZipFile(output_zip, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-                # 为每一行Excel数据生成一个PDF
-                for row_idx, row_data in enumerate(excel_data, 1):
-                    print(f"\n处理第 {row_idx} 行数据: {row_data}")
-                    
-                    pdf_writer = PdfWriter()
-                    
-                    # 复制PDF的所有页面到writer
-                    for page in pdf_reader.pages:
-                        pdf_writer.add_page(page)
-                    
-                    # 创建一个覆盖层，用于添加文本和图片
-                    packet = io.BytesIO()
-                    can = canvas.Canvas(packet, pagesize=(page_width, page_height))
-                    
-                    # 遍历icon_list，在PDF上添加内容
-                    for icon in icon_list_data:
-                        match_mode = icon.get('matchMode', '')
-                        option = icon.get('option', {})
-                        pointer = icon.get('pointer', {})
-                        page_index = icon.get('pageIndex', 1)
-                        
-                        # 获取坐标
-                        x = pointer.get('clientX', 0)
-                        y = page_height - pointer.get('clientY', 0)  # PDF坐标系Y轴是从下往上
-                        
-                        # 判断是否应该渲染此icon
-                        should_render = False
-                        
-                        if match_mode == 'single':
-                            # 单一模式，直接渲染
-                            should_render = True
-                        else:
-                            # 条件模式，检查conditions
-                            conditions = icon.get('conditions', [])
-                            should_render = evaluate_conditions(row_data, conditions)
-                        
-                        if should_render:
-                            option_type = option.get('type', '')
-                            
-                            if option_type == 'field':
-                                # 渲染文字
-                                field_name = option.get('fieldName', '')
-                                font_family = option.get('fontFamily', 'Helvetica')
-                                font_size = option.get('size', 12)
-                                
-                                # 获取字段值
-                                field_value = row_data.get(field_name, '')
-                                
-                                print(f"  渲染文字: {field_name}={field_value} at ({x}, {y}), 字体:{font_family}, 大小:{font_size}")
-                                
-                                # 设置字体（如果是中文字体，需要注册TTF）
-                                try:
-                                    can.setFont(font_family, font_size)
-                                except:
-                                    # 如果字体不存在，使用默认字体
-                                    can.setFont("Helvetica", font_size)
-                                
-                                can.drawString(x, y, str(field_value))
-                            
-                            elif option_type == 'image':
-                                # 渲染图片
-                                image_src = option.get('src', '')
-                                
-                                print(f"  渲染图片: {image_src} at ({x}, {y})")
-                                
-                                if image_src:
-                                    try:
-                                        # 下载图片
-                                        if image_src.startswith('http'):
-                                            response = requests.get(image_src, timeout=10)
-                                            img_data = response.content
-                                        else:
-                                            # 本地文件
-                                            with open(image_src, 'rb') as f:
-                                                img_data = f.read()
-                                        
-                                        # 保存到临时文件
-                                        temp_img_path = os.path.join(temp_dir, f"img_{row_idx}_{icon.get('id')}.png")
-                                        with open(temp_img_path, 'wb') as f:
-                                            f.write(img_data)
-                                        
-                                        # 获取图片尺寸
-                                        img = Image.open(io.BytesIO(img_data))
-                                        img_width, img_height = img.size
-                                        
-                                        # 使用icon的size或默认大小
-                                        icon_size = icon.get('size', 50)
-                                        scale = icon_size / max(img_width, img_height)
-                                        draw_width = img_width * scale
-                                        draw_height = img_height * scale
-                                        
-                                        can.drawImage(temp_img_path, x, y - draw_height, 
-                                                    width=draw_width, height=draw_height, 
-                                                    preserveAspectRatio=True)
-                                    except Exception as img_error:
-                                        print(f"    图片加载失败: {img_error}")
-                    
-                    can.save()
-                    packet.seek(0)
-                    
-                    # 将覆盖层添加到PDF
-                    overlay_reader = PdfReader(packet)
-                    first_page = pdf_writer.pages[0]
-                    first_page.merge_page(overlay_reader.pages[0])
-                    
-                    # 输出PDF到ZIP
-                    output_pdf = io.BytesIO()
-                    pdf_writer.write(output_pdf)
-                    pdf_filename = f"output_{row_idx:04d}.pdf"
-                    zip_file.writestr(pdf_filename, output_pdf.getvalue())
-                    
-                    print(f"  生成PDF: {pdf_filename}")
-        
-        finally:
-            # 清理临时目录
-            import shutil
-            shutil.rmtree(temp_dir, ignore_errors=True)
-        
-        output_zip.seek(0)
-        
-        return StreamingResponse(
-            iter([output_zip.getvalue()]),
-            media_type="application/zip",
-            headers={"Content-Disposition": "attachment; filename=batch_pdfs.zip"}
-        )
+    register_custom_fonts()
     
-    except ImportError as e:
-        error_msg = f"缺少必要的库: {str(e)}"
-        print(error_msg)
-        return {"success": False, "message": error_msg}
-    except Exception as e:
-        import traceback
-        error_msg = f"生成PDF失败: {str(e)}"
-        print(error_msg)
-        print(traceback.format_exc())
-        return {"success": False, "message": error_msg}
-
-
-def evaluate_conditions(data: dict, conditions: list) -> bool:
-    """
-    评估条件数组
-    conditions是一个数组，每个元素是一个条件组（字典）
-    条件组中的每个条件都需要满足（AND关系）
-    """
-    if not conditions:
-        return False
+    pdf_content = await pdf_file.read()
+    pdf_reader = PdfReader(io.BytesIO(pdf_content))
+    pdf_page_count = len(pdf_reader.pages)
+    
+    excel_content = await excel_file.read()
+    df = pd.read_excel(io.BytesIO(excel_content))
+    headers = df.columns.tolist()
+    content = df.values.tolist()
     
     try:
-        for condition_group in conditions:
-            # condition_group 是一个字典，如 {0: {...}, 1: {...}}
-            all_match = True
-            for key, condition in condition_group.items():
-                # 每个condition可能包含字段和值的比较
-                # 这里需要根据实际的condition结构来实现
-                # 暂时简单实现：检查condition是否为空
-                if isinstance(condition, dict) and condition:
-                    # 可以在这里添加更复杂的条件判断逻辑
-                    pass
+        icon_list_data = json.loads(icon_list) if isinstance(icon_list, str) else icon_list
+    except json.JSONDecodeError:
+        icon_list_data = []
+    
+    target_dir = Path(path) / "generatePdf"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    
+    def check_condition(row_data: dict, conditions: list, match_mode: str) -> bool:
+        results = []
+        for condition in conditions:
+            field = condition.get("field")
+            op = condition.get("op")
+            value = condition.get("value")
             
-            if all_match:
-                return True
+            field_value = row_data.get(field, "")
+            if field_value is None:
+                field_value = ""
+            field_value = str(field_value)
+            
+            if op == "等于":
+                result = field_value == value
+            elif op == "不等于":
+                result = field_value != value
+            elif op == "包含":
+                result = value in field_value
+            elif op == "不包含":
+                result = value not in field_value
+            elif op == "为空":
+                result = field_value == "" or field_value is None
+            elif op == "不为空":
+                result = field_value != "" and field_value is not None
+            else:
+                result = False
+            
+            results.append(result)
         
-        return False
-    except Exception as e:
-        print(f"条件评估失败: {e}")
-        return False
+        if not results:
+            return True
+        
+        if match_mode == "所有":
+            return all(results)
+        elif match_mode == "任一":
+            return any(results)
+        return True
+    
+    def render_icon_to_overlay(overlay_pdf, icon_item, row_data: dict):
+        from reportlab.lib.utils import ImageReader
+        
+        mode = icon_item.get("mode")
+        pointer = icon_item.get("pointer", {})
+        client_x = pointer.get("clientX", 0)
+        client_y = pointer.get("clientY", 0)
+        size = icon_item.get("size", 150)
+        
+        x = client_x
+        y = client_y
+        
+        font_size = size
+        
+        if mode == "single":
+            option = icon_item.get("option", {})
+            item_type = option.get("type")
+            
+            if item_type == "field":
+                field_name = option.get("fieldName")
+                font_family = option.get("fontFamily", "微软雅黑")
+                if field_name and field_name in row_data:
+                    field_value = str(row_data[field_name])
+                    overlay_pdf.setFont(font_family, font_size)
+                    overlay_pdf.drawString(x, y, field_value)
+            
+            elif item_type == "image":
+                src = option.get("src")
+                if src:
+                    src = src.strip()
+                    if src.startswith("http://asset.localhost/"):
+                        local_path = resolve_local_path_from_url(src)
+                    else:
+                        local_path = src
+                    
+                    if Path(local_path).exists():
+                        try:
+                            img = Image.open(local_path)
+                            img_width, img_height = img.size
+                            aspect = img_height / img_width
+                            render_width = size
+                            render_height = render_width * aspect
+                            
+                            overlay_pdf.drawImage(
+                                ImageReader(local_path),
+                                x, y,
+                                width=render_width,
+                                height=render_height,
+                                mask='auto'
+                            )
+                        except Exception as e:
+                            print(f"图片渲染失败: {local_path}, {e}")
+        
+        elif mode == "conditional":
+            conditions = icon_item.get("conditions", [])
+            match_mode = icon_item.get("matchMode", "所有")
+            
+            if check_condition(row_data, conditions, match_mode):
+                option = icon_item.get("option", {})
+                item_type = option.get("type")
+                
+                if item_type == "field":
+                    field_name = option.get("fieldName")
+                    font_family = option.get("fontFamily", "微软雅黑")
+                    if field_name and field_name in row_data:
+                        field_value = str(row_data[field_name])
+                        overlay_pdf.setFont(font_family, font_size)
+                        overlay_pdf.drawString(x, y, field_value)
+                
+                elif item_type == "image":
+                    src = option.get("src")
+                    if src:
+                        src = src.strip()
+                        if src.startswith("http://asset.localhost/"):
+                            local_path = resolve_local_path_from_url(src)
+                        else:
+                            local_path = src
+                        
+                        if Path(local_path).exists():
+                            try:
+                                img = Image.open(local_path)
+                                img_width, img_height = img.size
+                                aspect = img_height / img_width
+                                render_width = size
+                                render_height = render_width * aspect
+                                
+                                overlay_pdf.drawImage(
+                                    ImageReader(local_path),
+                                    x, y,
+                                    width=render_width,
+                                    height=render_height,
+                                    mask='auto'
+                                )
+                            except Exception as e:
+                                print(f"图片渲染失败: {local_path}, {e}")
+    
+    generated_files = []
+    
+    for row_idx, row in enumerate(content):
+        row_data = {headers[i]: row[i] for i in range(len(headers))}
+        
+        for page_idx in range(pdf_page_count):
+            original_page = pdf_reader.pages[page_idx]
+            page_width = original_page.mediabox.width
+            page_height = original_page.mediabox.height
+            
+            scaled_width = page_width * pdf_scale
+            scaled_height = page_height * pdf_scale
+            
+            original_page.scale(pdf_scale, pdf_scale)
+            
+            overlay_buffer = io.BytesIO()
+            c = canvas.Canvas(overlay_buffer, pagesize=(scaled_width, scaled_height))
+            
+            icons_on_page = [icon for icon in icon_list_data if icon.get("pageIndex") == page_idx + 1]
+            
+            for icon_item in icons_on_page:
+                render_icon_to_overlay(c, icon_item, row_data)
+            
+            c.save()
+            overlay_buffer.seek(0)
+            
+            overlay_reader = PdfReader(overlay_buffer)
+            overlay_page = overlay_reader.pages[0]
+            
+            writer = PdfWriter()
+            original_page.merge_page(overlay_page)
+            writer.add_page(original_page)
+            
+            output_buffer = io.BytesIO()
+            writer.write(output_buffer)
+            output_buffer.seek(0)
+            
+            output_reader = PdfReader(output_buffer)
+            output_page = output_reader.pages[0]
+            output_page.scale(1/pdf_scale, 1/pdf_scale)
+            
+            final_writer = PdfWriter()
+            final_writer.add_page(output_page)
+            
+            final_buffer = io.BytesIO()
+            final_writer.write(final_buffer)
+            final_buffer.seek(0)
+            
+            if pdf_page_count == 1:
+                output_filename = f"{row_idx + 1}.pdf"
+            else:
+                output_filename = f"{row_idx + 1}_page{page_idx + 1}.pdf"
+            
+            output_path = target_dir / output_filename
+            with open(output_path, "wb") as f:
+                f.write(final_buffer.read())
+            
+            generated_files.append(str(output_path))
+    
+    return {"msg": "PDF 已保存", "path": str(target_dir), "files": generated_files}
+    
+
