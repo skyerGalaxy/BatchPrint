@@ -1,7 +1,11 @@
 <template>
-  <HelloWorld />
+  <div />
 </template>
 
-<script lang="ts" setup>
-  //
+<script setup lang="ts">
+const router = useRouter()
+
+onMounted(() => {
+  router.replace('/batch-print')
+})
 </script>
