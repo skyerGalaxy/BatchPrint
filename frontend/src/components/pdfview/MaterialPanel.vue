@@ -17,9 +17,9 @@ const bpStore = useBPStore();
 
 const activeNav = ref('table');
 const navItems = [
-  { title: '表格', value: 'table' },
-  { title: '签字', value: 'signature' },
-  { title: '印章', value: 'seal' },
+  { title: '表格', value: 'table', icon: 'mdi-table' },
+  { title: '签字', value: 'signature', icon: 'mdi-draw-pen' },
+  { title: '印章', value: 'seal', icon: 'mdi-seal-variant' },
 ];
 
 const selectedImageType = ref<'signature' | 'seal' | null>(null);
@@ -28,7 +28,7 @@ const selectedImageIndex = ref<number | null>(null);
 const selectedField = ref<string | null>(null);
 
 // icon 配置
-const size = ref(40);
+const size = ref(120);
 const fontFamily = ref('微软雅黑'); // 存储字体的 value
 const fontOptions = ref<Font[]>([]); // 存储完整字体信息
 const fontDisplayNames = ref<string[]>([]); // 用于显示的字体名称
@@ -85,131 +85,315 @@ async function selectField(fieldName: string | null = null) {
 </script>
 
 <template>
-  <v-row style="height: 100%; margin: 0;">
-    <v-col cols="3" class="nav-col" style="padding-top: 12px; padding-bottom: 12px;" >
-      <v-list density="compact" nav>
+  <div class="material-panel">
+    <div class="mp-nav">
+      <v-list density="compact" nav class="mp-nav-list">
         <v-list-item
           v-for="item in navItems"
           :key="item.value"
+          :prepend-icon="item.icon"
           :title="item.title"
           :active="activeNav === item.value"
           @click="activeNav = item.value"
-        ></v-list-item>
+          class="mp-nav-item"
+          rounded="pill"
+        />
       </v-list>
-    </v-col>
+    </div>
 
-    <v-col cols="9" style="overflow: auto; max-height: 100%;">
-      <div v-if="activeNav === 'table'">
-        <v-row>
-          <v-col style="height: 100%; padding-right: 8px;">
-            <div style="max-height: 400px; overflow-y: auto;">
-                <v-radio-group @update:model-value="(value)=>selectField(value)" v-model="selectedField">
-                <v-radio
-                  v-for="item in bpStore.fieldNames"
-                  :key="item"
-                  :label="item"
-                  :value="item"
-                ></v-radio>
-                </v-radio-group>
-            </div>
-          </v-col>
-          <v-col style="height: 100%; border-left: 1px solid #e0e0e0; padding-left: 12px; overflow-y: auto;">
-            <div style="padding-top: 12px;">
-              <h4 style="margin-bottom: 16px; font-size: 14px;">配置</h4>
-                <v-select
-                v-model="fontFamily"
-                :items="fontOptions"
-                item-title="name"
-                item-value="value"
-                label="字体"
+    <v-divider vertical class="mp-divider" />
+
+    <div class="mp-content">
+      <div v-if="activeNav === 'table'" class="mp-table-panel">
+        <div class="mp-table-fields">
+          <div class="section-label">选择字段</div>
+          <div class="mp-scroll-area">
+            <v-radio-group
+              @update:model-value="(value: string | null) => selectField(value)"
+              v-model="selectedField"
+              hide-details
+              class="mp-radio-group"
+            >
+              <v-radio
+                v-for="item in bpStore.fieldNames"
+                :key="item"
+                :label="item"
+                :value="item"
                 density="compact"
-                style="margin-bottom: 12px;"
-                @update:model-value="()=>selectField()"
-                ></v-select>
-              <v-text-field
-                v-model.number="size"
-                label="大小"
-                type="number"
-                density="compact"
-                :min="16"
-                :max="200"
-                @update:model-value="()=>selectField()"
-              ></v-text-field>
-              <div style="margin-bottom: 12px;">
-                <p style="font-size: 12px; color: #666; margin-bottom: 8px;">预览</p>
-                <div style="height: 60px; border: 1px solid #e0e0e0; border-radius: 4px; padding: 8px; display: flex; align-items: center; background-color: #fafafa; overflow: hidden;">
-                  <span :style="{ fontFamily: fontFamily, fontSize:  '44px', color: '#000' }">预览文字</span>
-                </div>
-              </div>
+              />
+            </v-radio-group>
+          </div>
+        </div>
+
+        <v-divider vertical class="mp-divider" />
+
+        <div class="mp-table-config">
+          <div class="section-label">配置</div>
+          <v-select
+            v-model="fontFamily"
+            :items="fontOptions"
+            item-title="name"
+            item-value="value"
+            label="字体"
+            density="compact"
+            variant="outlined"
+            hide-details
+            class="mp-field"
+            @update:model-value="() => selectField()"
+          />
+          <v-text-field
+            v-model.number="size"
+            label="字号"
+            type="number"
+            density="compact"
+            variant="outlined"
+            hide-details
+            :min="16"
+            :max="200"
+            class="mp-field"
+            @update:model-value="() => selectField()"
+          />
+          <div class="mp-preview">
+            <div class="section-label">预览</div>
+            <div class="mp-preview-box">
+              <span :style="{ fontFamily: fontFamily, fontSize: Math.min(size, 32) + 'px', color: '#1f1f1f' }">预览文字</span>
             </div>
-          </v-col>
-        </v-row>
-      </div>
-
-      <div v-else-if="activeNav === 'signature'">
-        <div v-if="bpStore.imageList_signature.length === 0" class="text-center py-8">
-            <p class="text-grey">暂无签名</p>
-        </div>
-        <div
-          v-else
-          style="max-height: 400px; overflow-y: auto;"
-        >
-          <v-row dense>
-            <v-col v-for="(imgSrc, index) in bpStore.imageList_signature" :key="index" cols="12" sm="6" md="6">
-                <v-img
-                  :src="imgSrc"
-                  aspect-ratio="1"
-                  cover
-                  class="rounded img-tile"
-                  :class="{ 'is-selected': selectedImageType === 'signature' && selectedImageIndex === index }"
-                  @click="selectImage('signature', index)"
-                ></v-img>
-            </v-col>
-          </v-row>
+          </div>
         </div>
       </div>
 
-      <div v-else-if="activeNav === 'seal'">
-        <div v-if="bpStore.imageList_seal.length === 0" class="text-center py-8">
-            <p class="text-grey">暂无印章</p>
+      <div v-else-if="activeNav === 'signature'" class="mp-image-panel">
+        <div v-if="bpStore.imageList_signature.length === 0" class="mp-empty">
+          <v-icon size="40" color="grey-lighten-1">mdi-image-off-outline</v-icon>
+          <p>暂无签名，请先在素材库中添加</p>
         </div>
-        <div
-          v-else
-          style="max-height: 400px; overflow-y: auto;"
-        >
-          <v-row dense>
-            <v-col v-for="(imgSrc, index) in bpStore.imageList_seal" :key="index" cols="12" sm="6" md="6">
-                <v-img
-                  :src="imgSrc"
-                  aspect-ratio="1"
-                  cover
-                  class="rounded img-tile"
-                  :class="{ 'is-selected': selectedImageType === 'seal' && selectedImageIndex === index }"
-                  @click="selectImage('seal', index)"
-                ></v-img>
-            </v-col>
-          </v-row>
+        <div v-else class="mp-scroll-area">
+          <div class="mp-image-grid">
+            <div
+              v-for="(imgSrc, index) in bpStore.imageList_signature"
+              :key="index"
+              class="mp-image-item"
+              :class="{ 'is-selected': selectedImageType === 'signature' && selectedImageIndex === index }"
+              @click="selectImage('signature', index)"
+            >
+              <v-img :src="imgSrc" aspect-ratio="1" cover class="mp-image-thumb" />
+              <v-icon v-if="selectedImageType === 'signature' && selectedImageIndex === index" class="mp-check-icon" color="primary" size="20">mdi-check-circle</v-icon>
+            </div>
+          </div>
         </div>
       </div>
-    </v-col>
-  </v-row>
+
+      <div v-else-if="activeNav === 'seal'" class="mp-image-panel">
+        <div v-if="bpStore.imageList_seal.length === 0" class="mp-empty">
+          <v-icon size="40" color="grey-lighten-1">mdi-image-off-outline</v-icon>
+          <p>暂无印章，请先在素材库中添加</p>
+        </div>
+        <div v-else class="mp-scroll-area">
+          <div class="mp-image-grid">
+            <div
+              v-for="(imgSrc, index) in bpStore.imageList_seal"
+              :key="index"
+              class="mp-image-item"
+              :class="{ 'is-selected': selectedImageType === 'seal' && selectedImageIndex === index }"
+              @click="selectImage('seal', index)"
+            >
+              <v-img :src="imgSrc" aspect-ratio="1" cover class="mp-image-thumb" />
+              <v-icon v-if="selectedImageType === 'seal' && selectedImageIndex === index" class="mp-check-icon" color="primary" size="20">mdi-check-circle</v-icon>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 </template>
 
 <style scoped>
-.nav-col {
-  overflow: visible;
+.material-panel {
+  display: flex;
+  height: 100%;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.mp-nav {
+  flex-shrink: 0;
+  height: 100%;
   display: flex;
   flex-direction: column;
-  height: 100%;
+  padding: 8px 4px;
+  background: rgb(248, 249, 250);
+  border-right: 1px solid rgba(0, 0, 0, 0.04);
 }
 
-.img-tile {
+.mp-nav-list {
+  background: transparent;
+}
+
+.mp-nav-item {
+  height: 36px !important;
+  min-height: 36px !important;
+  margin-bottom: 4px !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  color: rgb(68, 71, 70) !important;
+  padding: 0 10px !important;
+  transition: background-color 0.15s ease;
+}
+
+.mp-nav-item:hover {
+  background-color: rgba(0, 0, 0, 0.04);
+}
+
+:deep(.mp-nav-item .v-list-item-title) {
+  font-size: 13px !important;
+  font-weight: 500 !important;
+}
+
+:deep(.mp-nav-item .v-list-item__prepend) {
+  margin-inline-end: 10px !important;
+}
+
+:deep(.mp-nav-item--active) {
+  background-color: rgb(219, 227, 241) !important;
+  color: rgb(4, 30, 73) !important;
+}
+
+.mp-divider {
+  margin: 0;
+}
+
+.mp-content {
+  flex: 1;
+  overflow: hidden;
+  padding: 12px;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.mp-table-panel {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  gap: 0;
+}
+
+.mp-table-fields {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding-right: 12px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.mp-scroll-area {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.mp-radio-group {
+  width: 100%;
+  min-height: 0;
+}
+
+.mp-table-config {
+  width: 160px;
+  flex-shrink: 0;
+  padding-left: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+}
+
+.mp-field {
+  margin-bottom: 0;
+}
+
+.mp-preview {
+  margin-top: 4px;
+}
+
+.mp-preview-box {
+  height: 56px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 8px;
+  padding: 4px 10px;
+  display: flex;
+  align-items: center;
+  background: rgb(250, 250, 250);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.section-label {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: rgb(100, 116, 139);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 6px;
+}
+
+.mp-image-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.mp-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 0;
+  color: rgb(148, 163, 184);
+  font-size: 13px;
+  gap: 8px;
+}
+
+.mp-image-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  align-content: start;
+}
+
+.mp-image-item {
+  position: relative;
   cursor: pointer;
-  opacity: 0.3;
-  transition: opacity 0.15s ease-in-out;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 2px solid transparent;
+  opacity: 0.45;
+  transition: opacity 0.15s, border-color 0.15s;
 }
 
-.img-tile.is-selected {
+.mp-image-item.is-selected {
   opacity: 1;
+  border-color: rgb(var(--v-theme-primary));
+}
+
+.mp-image-item:hover {
+  opacity: 0.75;
+}
+
+.mp-image-item.is-selected:hover {
+  opacity: 1;
+}
+
+.mp-check-icon {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  filter: drop-shadow(0 1px 2px rgba(255,255,255,0.8));
+}
+
+.mp-image-thumb {
+  width: 100%;
 }
 </style>

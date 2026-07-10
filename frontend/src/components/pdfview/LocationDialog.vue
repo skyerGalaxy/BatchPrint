@@ -126,53 +126,58 @@ function handleCancel() {
             <!-- Tab 2: 条件选项 - 两步流程 -->
             <v-tabs-window-item value="2" style="height: 100%;">
               <v-window v-model="step" style="height: 100%;">
-                <v-window-item :value="1" style="height: 100%;">
-                  <div style="display:flex; align-items:center; margin-bottom:8px; height:32px; min-height:32px; padding:4px 0;">
-                    <div style="font-size:13px; line-height:32px;">查找条件</div>
-                    <v-spacer></v-spacer>
-                    <div style="display:flex; align-items:center; gap:8px;">
-                      <div style="font-size:13px; line-height:32px;">符合以下</div>
+                <!-- Step 1: 编辑条件 -->
+                <v-window-item :value="1" style="height: 100%; display: flex; flex-direction: column;">
+                  <div class="cond-header">
+                    <span class="section-label">查找条件</span>
+                    <div class="cond-match-mode">
+                      <span class="cond-match-label">符合以下</span>
                       <v-select
                         :items="['所有','任一']"
                         v-model="matchMode"
-                        dense
-                        outlined
-                        height="10"
+                        density="compact"
+                        variant="outlined"
                         hide-details
+                        style="width: 80px;"
                       />
                     </div>
                   </div>
 
-                  <!-- 条件列表 -->
-                  <div style="display:flex; flex-direction:column; gap:8px; max-height: calc(40vh - 140px); overflow:auto; padding-right:8px;">
-                    <div
-                      v-for="(cond, idx) in conditions"
-                      :key="cond.id"
-                      style="display:flex; align-items:center; gap:8px;"
-                    >
+                  <div class="cond-list">
+                    <div v-for="(cond, idx) in conditions" :key="cond.id" class="cond-row">
                       <v-select
                         :items="bpStore.fieldNames.filter(f => !conditions.some(c => c.field === f))"
                         v-model="cond.field"
-                        dense
-                        style="width:200px"
-                        :placeholder="'请选择字段'"
+                        density="compact"
+                        variant="outlined"
+                        hide-details
+                        placeholder="字段"
+                        class="cond-field"
                       />
                       <v-select
                         :items="ops"
                         v-model="cond.op"
-                        dense
-                        style="width:120px"
+                        density="compact"
+                        variant="outlined"
+                        hide-details
+                        class="cond-op"
                       />
                       <v-text-field
                         v-model="cond.value"
-                        dense
+                        density="compact"
+                        variant="outlined"
+                        hide-details
                         placeholder="值"
                         :disabled="cond.op === '为空' || cond.op === '不为空'"
-                        style="flex:1; min-width:120px;"
+                        class="cond-value"
                       />
-                      <v-btn icon variant="flat" color="error" @click="removeCondition(idx)" :title="'删除条件'">
-                        <v-icon>mdi-close</v-icon>
-                      </v-btn>
+                      <v-btn
+                        icon="mdi-close"
+                        variant="text"
+                        size="small"
+                        color="grey-darken-1"
+                        @click="removeCondition(idx)"
+                      />
                     </div>
                   </div>
                 </v-window-item>
@@ -188,48 +193,92 @@ function handleCancel() {
         </v-card-text>
 
         <!-- 单一选项底部按钮 -->
-        <v-card-actions v-if="tab=='1'">
+        <v-card-actions v-if="tab=='1'" class="dialog-actions">
           <v-spacer></v-spacer>
-          <v-btn text @click="handleCancel">取消</v-btn>
-          <v-btn color="primary" @click="handleConfirm">确定</v-btn>
+          <v-btn variant="text" @click="handleCancel">取消</v-btn>
+          <v-btn variant="tonal" color="primary" @click="handleConfirm">确定</v-btn>
         </v-card-actions>
 
         <!-- 条件选项第一步：编辑条件 -->
-        <v-card-actions v-if="tab=='2'&&step==1">
-          <v-btn text small color="primary" @click="addCondition">
-            <v-icon left>mdi-plus</v-icon>添加条件
+        <v-card-actions v-if="tab=='2'&&step==1" class="dialog-actions">
+          <v-btn variant="text" color="primary" @click="addCondition">
+            <v-icon start>mdi-plus</v-icon>添加条件
           </v-btn>
           <v-spacer></v-spacer>
-          <v-btn color="primary" @click="step++">下一步</v-btn>
+          <v-btn variant="tonal" color="primary" @click="step++">下一步</v-btn>
         </v-card-actions>
 
         <!-- 条件选项第二步：选择选项 -->
-        <v-card-actions v-if="tab=='2'&&step==2">
-          <v-btn text @click="step--">上一步</v-btn>
+        <v-card-actions v-if="tab=='2'&&step==2" class="dialog-actions">
+          <v-btn variant="text" @click="step--">上一步</v-btn>
           <v-spacer></v-spacer>
-          <v-btn text @click="handleCancel">取消</v-btn>
-          <v-btn color="primary" @click="handleConfirm">确定</v-btn>
+          <v-btn variant="text" @click="handleCancel">取消</v-btn>
+          <v-btn variant="tonal" color="primary" @click="handleConfirm">确定</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
 </template>
 
-<style scoped >
-/* 左侧保持固定显示（可按需微调） */
-.nav-col {
-  /* 确保左侧不出现滚动条并垂直铺满 */
-  overflow: visible;
+<style scoped>
+.dialog-actions {
+  padding: 8px 16px;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.section-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: rgb(100, 116, 139);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.cond-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 4px 4px;
+}
+
+.cond-match-mode {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cond-match-label {
+  font-size: 13px;
+  color: rgb(100, 116, 139);
+  white-space: nowrap;
+}
+
+.cond-list {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  gap: 8px;
+  max-height: calc(40vh - 140px);
+  overflow-y: auto;
+  padding: 4px;
 }
 
-.v-text-field--box .v-input__slot,
-.v-text-field--outline .v-input__slot {
-  min-height: auto!important;
-  display: flex!important;
-  align-items: center!important;
+.cond-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
+.cond-field {
+  flex: 0 0 160px;
+  min-width: 120px;
+}
+
+.cond-op {
+  flex: 0 0 100px;
+}
+
+.cond-value {
+  flex: 1;
+  min-width: 80px;
+}
 </style>
 // ...existing code...

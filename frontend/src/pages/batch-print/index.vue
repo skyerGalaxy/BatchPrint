@@ -6,12 +6,24 @@
           <div class="card-header">
             <v-icon size="20" color="primary" class="mr-2">mdi-tune-variant</v-icon>
             <span class="card-title">输入与设置</span>
+            <v-spacer></v-spacer>
+            <v-btn
+              variant="text"
+              color="grey-darken-1"
+              size="small"
+              rounded="lg"
+              @click="handleReset"
+            >
+              <v-icon size="16" class="mr-1">mdi-refresh</v-icon>
+              重置
+            </v-btn>
           </div>
 
           <div class="control-body">
             <div class="section">
               <div class="section-label">模板</div>
               <v-file-input
+                :key="'pdf-' + resetKey"
                 accept="application/pdf,.pdf"
                 prepend-icon="mdi-file-pdf"
                 label="选择 PDF 模板"
@@ -25,6 +37,7 @@
             <div class="section">
               <div class="section-label">表格</div>
               <v-file-input
+                :key="'xls-' + resetKey"
                 accept=".xlsx, .xls"
                 prepend-icon="mdi-file-excel"
                 label="选择 Excel 数据"
@@ -98,12 +111,31 @@
     </v-row>
 
     <LibraryPanel ref="libraryPanel" />
+
+    <v-dialog v-model="mergedCellsDialog" max-width="480">
+      <v-card>
+        <v-card-item>
+          <v-card-title class="text-warning">
+            <v-icon color="warning" class="mr-2">mdi-alert</v-icon>
+            表格格式需要调整
+          </v-card-title>
+        </v-card-item>
+        <v-card-text>
+          <p>检测到 Excel 首行存在合并单元格，无法正确解析字段名。</p>
+          <p>请取消合并首行单元格，确保每个字段独占一列，然后重新选择文件。</p>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer></v-spacer>
+          <v-btn color="primary" @click="mergedCellsDialog = false">知道了</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </v-container>
 </template>
 
 <script setup lang="ts">
 import axios from 'axios'
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import PdfViewer from '@/components/pdfview/PdfViewer.vue'
 import LibraryPanel from '@/components/LibraryPanel.vue'
 import { useBPStore } from '@/stores/bpstore'
@@ -112,6 +144,14 @@ const pdfSrc = ref<string>('')
 const bpStore = useBPStore()
 
 const libraryPanel = ref<InstanceType<typeof LibraryPanel> | null>(null)
+const mergedCellsDialog = ref(false)
+const resetKey = ref(0)
+
+onMounted(() => {
+  if (bpStore.pdfSrc) {
+    pdfSrc.value = bpStore.pdfSrc
+  }
+})
 
 const handleFileChange = async (value: File | File[] | null) => {
   const file = Array.isArray(value) ? value[0] : value
@@ -141,8 +181,14 @@ const handleExcelChange = async (event: Event) => {
     formData.append('file', file)
 
     const res = await axios.post('http://localhost:8000/get_excel_headers', formData)
-    bpStore.fieldNames = res.data.headers
-    bpStore.excelContent = res.data.content
+    if (res.data.has_merged_cells) {
+      mergedCellsDialog.value = true
+      bpStore.fieldNames = []
+      bpStore.excelContent = []
+    } else {
+      bpStore.fieldNames = res.data.headers
+      bpStore.excelContent = res.data.content
+    }
   } else {
     alert('请选择有效的Excel文件')
   }
@@ -175,6 +221,18 @@ const generateBatchPDF = async () => {
     console.error('生成PDF失败:', error)
     alert('PDF批量生成出错，请查看浏览器控制台')
   }
+}
+
+const handleReset = () => {
+  pdfSrc.value = ''
+  bpStore.pdfSrc = ''
+  bpStore.pdfFile = null
+  bpStore.excelSrc = ''
+  bpStore.excelFile = null
+  bpStore.fieldNames = []
+  bpStore.excelContent = []
+  bpStore.iconList = []
+  resetKey.value++
 }
 </script>
 
@@ -295,7 +353,9 @@ const generateBatchPDF = async () => {
 
 /* ---- preview ---- */
 .preview-surface {
-  flex: 1;
+  /* 把预览区限制成可收缩的 flex 子项，确保内部滚动不会推动外层布局 */
+  flex: 1 1 0;
+  height: 0; /* 关键：与父容器的 flex 布局配合，约束高度 */
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -304,10 +364,13 @@ const generateBatchPDF = async () => {
   overflow: hidden;
   background: rgb(248, 249, 250);
   border: 1px solid rgba(0, 0, 0, 0.04);
+  box-sizing: border-box;
 }
 
 .preview-scroll {
-  flex: 1;
+  /* 占满父高度并由自身滚动 */
+  flex: 1 1 0;
+  height: 100%;
   min-height: 0;
   overflow: auto;
   overscroll-behavior: contain;

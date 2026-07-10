@@ -516,18 +516,20 @@ watch(
 .pdf-container {
   width: 100%;
   height: 100%;
-  overflow-y: auto;
   background-color: #f8f9fa;
   display: flex;
   flex-direction: column;
   align-items: center;
   padding: 10px 0;
+  box-sizing: border-box;
+  overflow: visible;
 }
 
 /* 每页保持 A4 比例、居中显示 */
 .pdf-page-wrapper {
   position: relative;
-  display: inline-block;
+  display: block;
+  width: 100%;
   margin: 12px auto;
 }
 
