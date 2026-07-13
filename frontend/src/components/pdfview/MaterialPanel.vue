@@ -27,24 +27,20 @@ const selectedImageIndex = ref<number | null>(null);
 
 const selectedField = ref<string | null>(null);
 
-// icon 配置
 const size = ref(120);
-const fontFamily = ref('微软雅黑'); // 存储字体的 value
-const fontOptions = ref<Font[]>([]); // 存储完整字体信息
-const fontDisplayNames = ref<string[]>([]); // 用于显示的字体名称
+const fontFamily = ref('微软雅黑');
+const fontOptions = ref<Font[]>([]);
+const fontDisplayNames = ref<string[]>([]);
 
-// 初始化时自动加载字体列表
 onMounted(async () => {
   try {
     fontOptions.value = await getFontsList();
     fontDisplayNames.value = fontOptions.value.map(f => f.name);
-    // 设置默认字体
     if (fontOptions.value.length > 0) {
       fontFamily.value = fontOptions.value[0].value;
     }
   } catch (error) {
     console.error('加载字体列表失败:', error);
-    // 使用默认字体列表
     fontOptions.value = [
       { name: '微软雅黑', value: '微软雅黑', type: 'system' },
       { name: '宋体', value: '宋体', type: 'system' },
@@ -69,7 +65,6 @@ function selectImage(type: 'signature' | 'seal', index: number) {
 }
 
 async function selectField(fieldName: string | null = null) {
-  // 如果通过字体名称选择,需要转换为 value
   let fontValue = fontFamily.value;
   if (fontDisplayNames.value.includes(fontFamily.value)) {
     fontValue = await getFontValueByName(fontFamily.value);
@@ -101,63 +96,59 @@ async function selectField(fieldName: string | null = null) {
       </v-list>
     </div>
 
-    <v-divider vertical class="mp-divider" />
-
     <div class="mp-content">
       <div v-if="activeNav === 'table'" class="mp-table-panel">
-        <div class="mp-table-fields">
+        <div class="mp-table-left">
           <div class="section-label">选择字段</div>
-          <div class="mp-scroll-area">
-            <v-radio-group
-              @update:model-value="(value: string | null) => selectField(value)"
-              v-model="selectedField"
-              hide-details
-              class="mp-radio-group"
-            >
-              <v-radio
-                v-for="item in bpStore.fieldNames"
-                :key="item"
-                :label="item"
-                :value="item"
-                density="compact"
-              />
-            </v-radio-group>
-          </div>
+          <v-radio-group
+            @update:model-value="(value: string | null) => selectField(value)"
+            v-model="selectedField"
+            hide-details
+            class="mp-radio-group"
+          >
+            <v-radio
+              v-for="item in bpStore.fieldNames"
+              :key="item"
+              :label="item"
+              :value="item"
+              density="compact"
+            />
+          </v-radio-group>
         </div>
 
-        <v-divider vertical class="mp-divider" />
+        <v-divider vertical />
 
-        <div class="mp-table-config">
-          <div class="section-label">配置</div>
-          <v-select
-            v-model="fontFamily"
-            :items="fontOptions"
-            item-title="name"
-            item-value="value"
-            label="字体"
-            density="compact"
-            variant="outlined"
-            hide-details
-            class="mp-field"
-            @update:model-value="() => selectField()"
-          />
-          <v-text-field
-            v-model.number="size"
-            label="字号"
-            type="number"
-            density="compact"
-            variant="outlined"
-            hide-details
-            :min="16"
-            :max="200"
-            class="mp-field"
-            @update:model-value="() => selectField()"
-          />
-          <div class="mp-preview">
-            <div class="section-label">预览</div>
-            <div class="mp-preview-box">
-              <span :style="{ fontFamily: fontFamily, fontSize: Math.min(size, 32) + 'px', color: '#1f1f1f' }">预览文字</span>
-            </div>
+        <div class="mp-table-right">
+          <div class="section-label">样式</div>
+          <div class="mp-ctrl-row">
+            <span class="mp-ctrl-label">字体</span>
+            <v-select
+              v-model="fontFamily"
+              :items="fontOptions"
+              item-title="name"
+              item-value="value"
+              density="compact"
+              variant="plain"
+              hide-details
+              @update:model-value="() => selectField()"
+            />
+          </div>
+          <div class="mp-ctrl-row">
+            <span class="mp-ctrl-label">字号</span>
+            <v-text-field
+              v-model.number="size"
+              type="number"
+              density="compact"
+              variant="plain"
+              hide-details
+              :min="16"
+              :max="200"
+              @update:model-value="() => selectField()"
+            />
+          </div>
+          <div class="mp-preview-box">
+            <span class="mp-preview-label">预览</span>
+            <span class="mp-preview-text" :style="{ fontFamily: fontFamily, fontSize: Math.min(size, 32) + 'px', color: '#1f1f1f' }">预览文字</span>
           </div>
         </div>
       </div>
@@ -167,18 +158,16 @@ async function selectField(fieldName: string | null = null) {
           <v-icon size="40" color="grey-lighten-1">mdi-image-off-outline</v-icon>
           <p>暂无签名，请先在素材库中添加</p>
         </div>
-        <div v-else class="mp-scroll-area">
-          <div class="mp-image-grid">
-            <div
-              v-for="(imgSrc, index) in bpStore.imageList_signature"
-              :key="index"
-              class="mp-image-item"
-              :class="{ 'is-selected': selectedImageType === 'signature' && selectedImageIndex === index }"
-              @click="selectImage('signature', index)"
-            >
-              <v-img :src="imgSrc" aspect-ratio="1" cover class="mp-image-thumb" />
-              <v-icon v-if="selectedImageType === 'signature' && selectedImageIndex === index" class="mp-check-icon" color="primary" size="20">mdi-check-circle</v-icon>
-            </div>
+        <div v-else class="mp-image-grid">
+          <div
+            v-for="(imgSrc, index) in bpStore.imageList_signature"
+            :key="index"
+            class="mp-image-item"
+            :class="{ 'is-selected': selectedImageType === 'signature' && selectedImageIndex === index }"
+            @click="selectImage('signature', index)"
+          >
+            <v-img :src="imgSrc" aspect-ratio="1" cover class="mp-image-thumb" />
+            <v-icon v-if="selectedImageType === 'signature' && selectedImageIndex === index" class="mp-check-icon" color="primary" size="20">mdi-check-circle</v-icon>
           </div>
         </div>
       </div>
@@ -188,18 +177,16 @@ async function selectField(fieldName: string | null = null) {
           <v-icon size="40" color="grey-lighten-1">mdi-image-off-outline</v-icon>
           <p>暂无印章，请先在素材库中添加</p>
         </div>
-        <div v-else class="mp-scroll-area">
-          <div class="mp-image-grid">
-            <div
-              v-for="(imgSrc, index) in bpStore.imageList_seal"
-              :key="index"
-              class="mp-image-item"
-              :class="{ 'is-selected': selectedImageType === 'seal' && selectedImageIndex === index }"
-              @click="selectImage('seal', index)"
-            >
-              <v-img :src="imgSrc" aspect-ratio="1" cover class="mp-image-thumb" />
-              <v-icon v-if="selectedImageType === 'seal' && selectedImageIndex === index" class="mp-check-icon" color="primary" size="20">mdi-check-circle</v-icon>
-            </div>
+        <div v-else class="mp-image-grid">
+          <div
+            v-for="(imgSrc, index) in bpStore.imageList_seal"
+            :key="index"
+            class="mp-image-item"
+            :class="{ 'is-selected': selectedImageType === 'seal' && selectedImageIndex === index }"
+            @click="selectImage('seal', index)"
+          >
+            <v-img :src="imgSrc" aspect-ratio="1" cover class="mp-image-thumb" />
+            <v-icon v-if="selectedImageType === 'seal' && selectedImageIndex === index" class="mp-check-icon" color="primary" size="20">mdi-check-circle</v-icon>
           </div>
         </div>
       </div>
@@ -208,26 +195,23 @@ async function selectField(fieldName: string | null = null) {
 </template>
 
 <style scoped>
+/* ===== layout ===== */
 .material-panel {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto 1fr;
   height: 100%;
   overflow: hidden;
-  min-height: 0;
 }
 
 .mp-nav {
-  flex-shrink: 0;
-  height: 100%;
   display: flex;
   flex-direction: column;
   padding: 8px 4px;
   background: rgb(248, 249, 250);
-  border-right: 1px solid rgba(0, 0, 0, 0.04);
+  overflow-y: auto;
 }
 
-.mp-nav-list {
-  background: transparent;
-}
+.mp-nav-list { background: transparent; }
 
 .mp-nav-item {
   height: 36px !important;
@@ -239,110 +223,110 @@ async function selectField(fieldName: string | null = null) {
   padding: 0 10px !important;
   transition: background-color 0.15s ease;
 }
-
-.mp-nav-item:hover {
-  background-color: rgba(0, 0, 0, 0.04);
-}
+.mp-nav-item:hover { background-color: rgba(0, 0, 0, 0.04); }
 
 :deep(.mp-nav-item .v-list-item-title) {
   font-size: 13px !important;
   font-weight: 500 !important;
 }
-
 :deep(.mp-nav-item .v-list-item__prepend) {
   margin-inline-end: 10px !important;
 }
-
 :deep(.mp-nav-item--active) {
   background-color: rgb(219, 227, 241) !important;
   color: rgb(4, 30, 73) !important;
 }
 
-.mp-divider {
-  margin: 0;
-}
-
 .mp-content {
-  flex: 1;
-  overflow: hidden;
+  min-width: 0;
   padding: 12px;
-  min-width: 0;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
+  overflow: hidden;
 }
 
+/* ===== table panel ===== */
 .mp-table-panel {
+  height: 100%;
   display: flex;
-  flex: 1;
-  min-height: 0;
-  gap: 0;
 }
 
-.mp-table-fields {
+.mp-table-left {
   flex: 1;
-  display: flex;
-  flex-direction: column;
-  padding-right: 12px;
   min-width: 0;
-  min-height: 0;
-}
-
-.mp-scroll-area {
-  flex: 1;
-  min-height: 0;
+  padding-right: 12px;
   overflow-y: auto;
 }
 
-.mp-radio-group {
-  width: 100%;
-  min-height: 0;
-}
-
-.mp-table-config {
-  width: 160px;
+.mp-table-right {
+  width: 200px;
   flex-shrink: 0;
   padding-left: 12px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  overflow-y: auto;
+  gap: 12px;
 }
 
-.mp-field {
-  margin-bottom: 0;
-}
-
-.mp-preview {
-  margin-top: 4px;
-}
-
-.mp-preview-box {
-  height: 56px;
-  border: 1px solid rgba(0, 0, 0, 0.1);
-  border-radius: 8px;
-  padding: 4px 10px;
+/* ===== right panel controls ===== */
+.mp-ctrl-row {
   display: flex;
   align-items: center;
-  background: rgb(250, 250, 250);
-  overflow: hidden;
-  white-space: nowrap;
+  gap: 0;
 }
 
-.section-label {
-  font-size: 0.68rem;
-  font-weight: 600;
-  color: rgb(100, 116, 139);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  margin-bottom: 6px;
+.mp-ctrl-label {
+  flex-shrink: 0;
+  width: 40px;
+  font-size: 13px;
+  color: rgb(68, 71, 70);
 }
 
-.mp-image-panel {
+.mp-ctrl-row :deep(.v-input) {
   flex: 1;
+  min-width: 0;
+}
+
+.mp-ctrl-row :deep(.v-field) {
+  font-size: 13px;
+}
+
+.mp-ctrl-row :deep(.v-field__input) {
+  min-height: auto;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+/* ===== preview ===== */
+.mp-preview-box {
+  margin-top: auto;
+  padding: 10px 12px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 8px;
+  background: rgb(248, 249, 250);
   display: flex;
   flex-direction: column;
-  min-height: 0;
+  align-items: center;
+  justify-content: center;
+  min-height: 72px;
+  gap: 4px;
+}
+
+.mp-preview-label {
+  font-size: 11px;
+  color: rgb(148, 163, 184);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.mp-preview-text {
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* ===== image panel ===== */
+.mp-image-panel {
+  height: 100%;
+  overflow-y: auto;
 }
 
 .mp-empty {
@@ -350,7 +334,7 @@ async function selectField(fieldName: string | null = null) {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 32px 0;
+  height: 100%;
   color: rgb(148, 163, 184);
   font-size: 13px;
   gap: 8px;
@@ -360,7 +344,6 @@ async function selectField(fieldName: string | null = null) {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 8px;
-  align-content: start;
 }
 
 .mp-image-item {
@@ -372,19 +355,9 @@ async function selectField(fieldName: string | null = null) {
   opacity: 0.45;
   transition: opacity 0.15s, border-color 0.15s;
 }
-
-.mp-image-item.is-selected {
-  opacity: 1;
-  border-color: rgb(var(--v-theme-primary));
-}
-
-.mp-image-item:hover {
-  opacity: 0.75;
-}
-
-.mp-image-item.is-selected:hover {
-  opacity: 1;
-}
+.mp-image-item.is-selected { opacity: 1; border-color: rgb(var(--v-theme-primary)); }
+.mp-image-item:hover { opacity: 0.75; }
+.mp-image-item.is-selected:hover { opacity: 1; }
 
 .mp-check-icon {
   position: absolute;
@@ -393,7 +366,18 @@ async function selectField(fieldName: string | null = null) {
   filter: drop-shadow(0 1px 2px rgba(255,255,255,0.8));
 }
 
-.mp-image-thumb {
-  width: 100%;
+.mp-image-thumb { width: 100%; }
+
+/* ===== shared ===== */
+.section-label {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: rgb(100, 116, 139);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 6px;
+  flex-shrink: 0;
 }
+
+.mp-radio-group { width: 100%; }
 </style>

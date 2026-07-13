@@ -25,7 +25,6 @@ const step = ref(1);
 
 const bpStore = useBPStore();
 
-// 选项数据
 type SelectedOption = 
   | { type: 'field'; fieldName: string; fontFamily?: string; size?: number }
   | { type: 'image'; src: string }
@@ -34,7 +33,6 @@ type SelectedOption =
 const selectedOption = ref<SelectedOption>(null);
 
 
-// 条件数据
 type Condition = { id: number; field: string | null; op: string; value: string };
 const ops = ['等于', '不等于', '包含', '不包含', '为空', '不为空'];
 const matchMode = ref('所有');
@@ -80,7 +78,6 @@ function handleConfirm() {
 
     console.log('iconlist:', bpStore.iconList);
 
-    //重置所有状态
     tab.value = '1';
     step.value = 1;
     selectedOption.value = null;
@@ -98,9 +95,8 @@ function handleCancel() {
 
 <template>
   <v-dialog v-model="props.dialog" max-width="650">
-      <!-- 固定高度，保持列布局 -->
-      <v-card style="height: 40vh; min-height: 40vh; max-height: 40vh; display: flex; flex-direction: column;">
-        <v-card-item>
+      <v-card class="loc-card">
+        <v-card-item class="loc-card-header">
           <v-tabs
             v-model="tab"
             fixed-tabs
@@ -113,21 +109,17 @@ function handleCancel() {
           </v-tabs>
         </v-card-item>
 
-        <!-- 主内容区域 -->
-        <v-card-text style="flex: 1; overflow: hidden; padding: 0 12px;">
-          <v-tabs-window v-model="tab" style="height: 100%;">
-            <!-- Tab 1: 单一选项 - 直接显示选项选择 -->
-            <v-tabs-window-item value="1" style="height: 100%;">
+        <v-card-text class="loc-card-body">
+          <v-tabs-window v-model="tab" class="loc-tabs-window">
+            <v-tabs-window-item value="1">
               <material-panel
                 @select_option="selectedOption = $event;console.log('选项更新:', $event)"
               />
             </v-tabs-window-item>
 
-            <!-- Tab 2: 条件选项 - 两步流程 -->
-            <v-tabs-window-item value="2" style="height: 100%;">
-              <v-window v-model="step" style="height: 100%;">
-                <!-- Step 1: 编辑条件 -->
-                <v-window-item :value="1" style="height: 100%; display: flex; flex-direction: column;">
+            <v-tabs-window-item value="2">
+              <v-window v-model="step" class="loc-step-window">
+                <v-window-item :value="1" class="loc-step-panel">
                   <div class="cond-header">
                     <span class="section-label">查找条件</span>
                     <div class="cond-match-mode">
@@ -181,8 +173,7 @@ function handleCancel() {
                     </div>
                   </div>
                 </v-window-item>
-                <!-- Step 2: 选项选择 -->
-                <v-window-item :value="2" style="height: 100%;">
+                <v-window-item :value="2">
                   <material-panel
                     @select_option="selectedOption = $event;console.log('选项更新:', $event)"
                   />
@@ -192,14 +183,12 @@ function handleCancel() {
           </v-tabs-window>
         </v-card-text>
 
-        <!-- 单一选项底部按钮 -->
         <v-card-actions v-if="tab=='1'" class="dialog-actions">
           <v-spacer></v-spacer>
           <v-btn variant="text" @click="handleCancel">取消</v-btn>
           <v-btn variant="tonal" color="primary" @click="handleConfirm">确定</v-btn>
         </v-card-actions>
 
-        <!-- 条件选项第一步：编辑条件 -->
         <v-card-actions v-if="tab=='2'&&step==1" class="dialog-actions">
           <v-btn variant="text" color="primary" @click="addCondition">
             <v-icon start>mdi-plus</v-icon>添加条件
@@ -208,7 +197,6 @@ function handleCancel() {
           <v-btn variant="tonal" color="primary" @click="step++">下一步</v-btn>
         </v-card-actions>
 
-        <!-- 条件选项第二步：选择选项 -->
         <v-card-actions v-if="tab=='2'&&step==2" class="dialog-actions">
           <v-btn variant="text" @click="step--">上一步</v-btn>
           <v-spacer></v-spacer>
@@ -220,9 +208,53 @@ function handleCancel() {
 </template>
 
 <style scoped>
+.loc-card {
+  height: 40vh;
+  min-height: 40vh;
+  max-height: 40vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.loc-card-header {
+  flex-shrink: 0;
+}
+
+.loc-card-body {
+  flex: 1;
+  padding: 0 12px !important;
+  overflow: hidden;
+  position: relative;
+}
+
+.loc-tabs-window {
+  position: absolute;
+  inset: 0;
+  height: 100% !important;
+}
+
+.loc-step-window {
+  height: 100% !important;
+}
+
+.loc-step-panel {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 .dialog-actions {
   padding: 8px 16px;
   border-top: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+:deep(.v-window__container) {
+  height: 100% !important;
+}
+
+:deep(.v-window-item) {
+  height: 100%;
+  overflow: hidden;
 }
 
 .section-label {
@@ -253,10 +285,10 @@ function handleCancel() {
 }
 
 .cond-list {
+  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-height: calc(40vh - 140px);
   overflow-y: auto;
   padding: 4px;
 }
@@ -281,4 +313,3 @@ function handleCancel() {
   min-width: 80px;
 }
 </style>
-// ...existing code...
