@@ -3,6 +3,7 @@ import { defineStore } from "pinia";
 import {Store} from '@tauri-apps/plugin-store'
 import { mkdir } from "@tauri-apps/plugin-fs";
 import { appLocalDataDir } from '@tauri-apps/api/path';
+import type { StoreIcon } from '@/types/icon';
 
 interface Pointer {
   pageIndex: number;  
@@ -34,7 +35,7 @@ export const useBPStore = defineStore("bpstore", () => {
 
   const excelContent = ref<any[][]>([]); 
 
-  const iconList = ref<{}[]>([]);
+  const iconList = ref<StoreIcon[]>([]);
 
   const pdfSrc = ref<string>("");
   const excelSrc = ref<string>(""); 

@@ -60,13 +60,23 @@ interface IconOption {
   type: 'field' | 'image';
   fieldName?: string;
   fontFamily?: string;
+  fontWeight?: number;
+  opacity?: number;
+  color?: string;
   src?: string;
 }
 
 interface IconCondition {
+  id?: number;
   field: string | null;
   op: string;
   value: string;
+}
+
+interface ConditionGroup {
+  id: number;
+  matchMode: string;
+  conditions: IconCondition[];
 }
 
 interface StoreIcon {
@@ -75,8 +85,11 @@ interface StoreIcon {
   pageIndex: number;
   pointer: { clientX: number; clientY: number };
   option: IconOption;
+  logicType?: string;
   conditions?: IconCondition[];
   matchMode?: string;
+  groups?: ConditionGroup[];
+  groupConnectors?: string[];
   size?: number;
 }
 
@@ -378,13 +391,15 @@ function getFieldValue(fieldName: string): string {
 }
 
 // 辅助函数：绘制字段文本
-function drawFieldText(ctx: CanvasRenderingContext2D, fieldName: string, fontFamily: string, fontSize: number, x: number, y: number): void {
+function drawFieldText(ctx: CanvasRenderingContext2D, fieldName: string, fontFamily: string, fontSize: number, fontWeight: number, opacity: number, color: string, x: number, y: number): void {
   const fieldValue = getFieldValue(fieldName);
-  ctx.fillStyle = "#000";
-  ctx.font = `${fontSize}px ${fontFamily}`;
+  ctx.globalAlpha = opacity;
+  ctx.fillStyle = color;
+  ctx.font = `${fontWeight} ${fontSize}px "${fontFamily}"`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillText(fieldValue, x, y);
+  ctx.globalAlpha = 1;
 }
 
 // 辅助函数：绘制图片
@@ -410,24 +425,42 @@ function drawImageIcon(ctx: CanvasRenderingContext2D, imgSrc: string, x: number,
   }
 }
 
-// 辅助函数：检查条件是否满足
-function checkConditions(conditions: IconCondition[] | undefined, matchMode: string | undefined): boolean {
-  if (!conditions?.length) return true;
-  
-  const checkCondition = (cond: IconCondition): boolean => {
-    const fieldValue = getFieldValue(cond.field || '');
-    switch (cond.op) {
-      case '等于': return fieldValue === cond.value;
-      case '不等于': return fieldValue !== cond.value;
-      case '包含': return fieldValue.includes(cond.value);
-      case '不包含': return !fieldValue.includes(cond.value);
-      case '为空': return !fieldValue;
-      case '不为空': return !!fieldValue;
-      default: return false;
+function checkConditionFlat(cond: IconCondition): boolean {
+  const fieldValue = getFieldValue(cond.field || '');
+  switch (cond.op) {
+    case '等于': return fieldValue === cond.value;
+    case '不等于': return fieldValue !== cond.value;
+    case '包含': return fieldValue.includes(cond.value);
+    case '不包含': return !fieldValue.includes(cond.value);
+    case '为空': return !fieldValue;
+    case '不为空': return !!fieldValue;
+    default: return false;
+  }
+}
+
+function checkConditions(condArr: IconCondition[] | undefined, matchMode: string | undefined): boolean {
+  if (!condArr?.length) return true;
+  return matchMode === '所有' ? condArr.every(checkConditionFlat) : condArr.some(checkConditionFlat);
+}
+
+function checkIconConditions(icon: StoreIcon): boolean {
+  if (!icon.conditions && !icon.groups) return true;
+
+  if (icon.logicType === 'advanced' && icon.groups?.length) {
+    const groupResults = icon.groups.map(g => checkConditions(g.conditions, g.matchMode));
+    let result = groupResults[0];
+    const connectors = icon.groupConnectors || [];
+    for (let i = 0; i < connectors.length; i++) {
+      if (connectors[i] === '所有') {
+        result = result && groupResults[i + 1];
+      } else {
+        result = result || groupResults[i + 1];
+      }
     }
-  };
-  
-  return matchMode === '所有' ? conditions.every(checkCondition) : conditions.some(checkCondition);
+    return result;
+  }
+
+  return checkConditions(icon.conditions, icon.matchMode);
 }
 
 // 辅助函数：绘制删除和缩放按钮
@@ -462,14 +495,22 @@ function drawIcon(ctx: CanvasRenderingContext2D, icon: StoreIcon, scaleX: number
   const size = getIconSize(icon);
 
   // 检查是否应该绘制内容（single 模式总是绘制，conditional 模式需要检查条件）
-  const shouldDraw = icon.mode === 'single' || checkConditions(icon.conditions, icon.matchMode);
+  const shouldDraw = icon.mode === 'single' || checkIconConditions(icon);
 
   if (shouldDraw) {
     const fontFamily = icon.option.fontFamily || '微软雅黑';
     const fontSize = Math.max(8, Math.floor(size * 0.3));
     
     if (icon.option.type === 'field') {
-      drawFieldText(ctx, icon.option.fieldName || '', fontFamily, fontSize, x, y);
+      drawFieldText(ctx,
+        icon.option.fieldName || '',
+        fontFamily,
+        fontSize,
+        icon.option.fontWeight ?? 400,
+        icon.option.opacity ?? 1,
+        icon.option.color ?? '#000000',
+        x, y
+      );
     } else if (icon.option.type === 'image') {
       drawImageIcon(ctx, icon.option.src || '', x, y, size, icon.pageIndex);
     }

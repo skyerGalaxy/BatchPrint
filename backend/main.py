@@ -221,7 +221,54 @@ async def generate_batch_pdf(
         elif match_mode == "任一":
             return any(results)
         return True
+
+    def evaluate_icon_conditions(row_data: dict, icon_item: dict) -> bool:
+        logic_type = icon_item.get("logicType", "simple")
+
+        if logic_type == "advanced":
+            groups = icon_item.get("groups", [])
+            if not groups:
+                return True
+            group_results = []
+            for group in groups:
+                group_conditions = group.get("conditions", [])
+                group_match_mode = group.get("matchMode", "所有")
+                group_results.append(check_condition(row_data, group_conditions, group_match_mode))
+
+            result = group_results[0]
+            connectors = icon_item.get("groupConnectors", [])
+            for i, connector in enumerate(connectors):
+                if connector == "所有":
+                    result = result and group_results[i + 1]
+                else:
+                    result = result or group_results[i + 1]
+            return result
+
+        conditions = icon_item.get("conditions", [])
+        match_mode = icon_item.get("matchMode", "所有")
+        return check_condition(row_data, conditions, match_mode)
     
+    def _apply_font_style(c, font_family, font_weight, font_size, color_hex, item_opacity):
+        if font_weight >= 600:
+            try:
+                c.setFont(font_family + "-Bold", font_size)
+            except:
+                c.setFont(font_family, font_size)
+        else:
+            c.setFont(font_family, font_size)
+
+        if item_opacity < 1.0:
+            try:
+                c.setFillAlpha(item_opacity)
+            except:
+                pass
+
+        hex_str = color_hex.lstrip('#')
+        r = int(hex_str[0:2], 16) / 255.0
+        g = int(hex_str[2:4], 16) / 255.0
+        b = int(hex_str[4:6], 16) / 255.0
+        c.setFillColorRGB(r, g, b)
+
     def render_icon_to_overlay(overlay_pdf, icon_item, row_data: dict, overlay_height: float):
         from reportlab.lib.utils import ImageReader
         
@@ -243,9 +290,12 @@ async def generate_batch_pdf(
             if item_type == "field":
                 field_name = option.get("fieldName")
                 font_family = option.get("fontFamily", "微软雅黑")
+                font_weight = option.get("fontWeight", 400)
+                item_color = option.get("color", "#000000")
+                item_opacity = option.get("opacity", 1.0)
                 if field_name and field_name in row_data:
                     field_value = str(row_data[field_name])
-                    overlay_pdf.setFont(font_family, font_size)
+                    _apply_font_style(overlay_pdf, font_family, font_weight, font_size, item_color, item_opacity)
                     overlay_pdf.drawCentredString(x, y, field_value)
             
             elif item_type == "image":
@@ -280,19 +330,19 @@ async def generate_batch_pdf(
                             print(f"图片渲染失败: {local_path}, {e}")
         
         elif mode == "conditional":
-            conditions = icon_item.get("conditions", [])
-            match_mode = icon_item.get("matchMode", "所有")
-            
-            if check_condition(row_data, conditions, match_mode):
+            if evaluate_icon_conditions(row_data, icon_item):
                 option = icon_item.get("option", {})
                 item_type = option.get("type")
                 
                 if item_type == "field":
                     field_name = option.get("fieldName")
                     font_family = option.get("fontFamily", "微软雅黑")
+                    font_weight = option.get("fontWeight", 400)
+                    item_color = option.get("color", "#000000")
+                    item_opacity = option.get("opacity", 1.0)
                     if field_name and field_name in row_data:
                         field_value = str(row_data[field_name])
-                        overlay_pdf.setFont(font_family, font_size)
+                        _apply_font_style(overlay_pdf, font_family, font_weight, font_size, item_color, item_opacity)
                         overlay_pdf.drawCentredString(x, y, field_value)
                 
                 elif item_type == "image":
