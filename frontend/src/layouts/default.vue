@@ -67,29 +67,28 @@
 
       <!-- Footer Section -->
       <div class="sidebar-footer" :class="{ 'is-rail': rail }">
-        <v-list class="pa-0" density="compact" nav>
-          <!-- Settings Item -->
-          <v-list-item
-            v-if="!rail"
-            prepend-icon="mdi-cog-outline"
-            title="设置"
-            value="settings"
-            class="footer-item"
-            rounded="pill"
-            @click="openSettings"
-          />
-          <v-list-item
-            v-else
-            class="footer-item justify-center text-center pa-0"
-            rounded="pill"
-            @click="openSettings"
-          >
-            <template #prepend>
-              <v-icon size="20" class="ma-0">mdi-cog-outline</v-icon>
-            </template>
-            <v-tooltip activator="parent" location="right">设置</v-tooltip>
-          </v-list-item>
-        </v-list>
+        <div v-if="!rail">
+          <v-list class="pa-0" density="compact" nav>
+            <v-list-item
+              prepend-icon="mdi-cog-outline"
+              title="设置"
+              value="settings"
+              class="footer-item"
+              rounded="pill"
+              @click="openSettings"
+            />
+          </v-list>
+        </div>
+        <v-btn
+          v-else
+          icon
+          variant="text"
+          density="comfortable"
+          @click="openSettings"
+        >
+          <v-icon>mdi-cog-outline</v-icon>
+          <v-tooltip activator="parent" location="right">设置</v-tooltip>
+        </v-btn>
 
         <!-- Profile Item -->
         <div class="profile-container mt-2" :class="{ 'is-rail': rail }">
@@ -378,7 +377,7 @@ function openSettings() {
 .v-theme--dark .footer-item {
   color: #c4c7c5 !important;
 }
-:deep(.footer-item .v-list-item__prepend) {
+.sidebar-footer:not(.is-rail) :deep(.footer-item .v-list-item__prepend) {
   margin-inline-end: 16px !important;
 }
 
