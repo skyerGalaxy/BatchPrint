@@ -89,16 +89,6 @@
               <v-icon size="20" color="primary" class="mr-2">mdi-eye-outline</v-icon>
               <span class="card-title">预览区</span>
             </div>
-            <v-btn
-              variant="outlined"
-              color="primary"
-              size="small"
-              rounded="lg"
-              @click="libraryPanel?.openDialog()"
-            >
-              <v-icon size="16" class="mr-1">mdi-image-multiple</v-icon>
-              素材库
-            </v-btn>
           </div>
 
           <div class="preview-surface">
@@ -109,8 +99,6 @@
         </div>
       </v-col>
     </v-row>
-
-    <LibraryPanel ref="libraryPanel" />
 
     <v-dialog v-model="mergedCellsDialog" max-width="480">
       <v-card>
@@ -137,13 +125,11 @@
 import axios from 'axios'
 import { ref, onMounted } from 'vue'
 import PdfViewer from '@/components/pdfview/PdfViewer.vue'
-import LibraryPanel from '@/components/LibraryPanel.vue'
 import { useBPStore } from '@/stores/bpstore'
 
 const pdfSrc = ref<string>('')
 const bpStore = useBPStore()
 
-const libraryPanel = ref<InstanceType<typeof LibraryPanel> | null>(null)
 const mergedCellsDialog = ref(false)
 const resetKey = ref(0)
 

@@ -95,14 +95,21 @@ interface StoreIcon {
 
 const icons = ref<StoreIcon[]>([]);
 const selectedIcon = ref<StoreIcon | null>(null);
-const hoveredIcon = ref<StoreIcon | null>(null);
 const isDragging = ref(false);
 const isResizing = ref(false);
+const isRotating = ref(false);
 const dragOffset = ref({ x: 0, y: 0 });
 const resizeStartSize = ref(0);
 const resizeStartDist = ref(0);
 const resizeIcon = ref<StoreIcon | null>(null);
+const rotateIcon = ref<StoreIcon | null>(null);
+const rotateStartAngle = ref(0);
+const rotateStartRotation = ref(0);
 const imageCache = new Map<string, HTMLImageElement>();
+
+const BTN_R = 10;
+const BTN_PAD = 5;
+const HIT_PAD = 4;
 
 // 加载 PDF 文件
 const loadFile = (url: string) => {
@@ -221,42 +228,40 @@ function isPointInIcon(point: { x: number; y: number }, icon: StoreIcon) {
   );
 }
 
-// 检查鼠标是否在左上角删除按钮上
-function isPointOnDeleteButton(point: { x: number; y: number }, icon: StoreIcon): boolean {
-  const size = getIconSize(icon);
-  const deleteX = icon.pointer.clientX - size / 2;
-  const deleteY = icon.pointer.clientY - size / 2;
-  const buttonSize = 16;
-  return (
-    point.x >= deleteX - buttonSize / 2 &&
-    point.x <= deleteX + buttonSize / 2 &&
-    point.y >= deleteY - buttonSize / 2 &&
-    point.y <= deleteY + buttonSize / 2
-  );
+function hitCornerButton(point: { x: number; y: number }, icon: StoreIcon): 'delete' | 'rotate' | 'resize' | null {
+  const bounds = getIconBounds(icon);
+  const dx = point.x - icon.pointer.clientX;
+  const dy = point.y - icon.pointer.clientY;
+  const rot = -(icon.rotation ?? 0) * Math.PI / 180;
+  const rx = dx * Math.cos(rot) - dy * Math.sin(rot);
+  const ry = dx * Math.sin(rot) + dy * Math.cos(rot);
+
+  const hw = bounds.halfW + BTN_PAD + BTN_R;
+  const hh = bounds.halfH + BTN_PAD + BTN_R;
+  const checkR = BTN_R + HIT_PAD;
+
+  if ((rx + hw) ** 2 + (ry + hh) ** 2 <= checkR ** 2) return 'delete';
+  if ((rx - hw) ** 2 + (ry + hh) ** 2 <= checkR ** 2) return 'rotate';
+  if ((rx - hw) ** 2 + (ry - hh) ** 2 <= checkR ** 2) return 'resize';
+  return null;
 }
 
-// 检查鼠标是否在右下角缩放按钮上
-function isPointOnResizeButton(point: { x: number; y: number }, icon: StoreIcon): boolean {
-  const size = getIconSize(icon);
-  const resizeX = icon.pointer.clientX + size / 2;
-  const resizeY = icon.pointer.clientY + size / 2;
-  const buttonSize = 16;
-  return (
-    point.x >= resizeX - buttonSize / 2 &&
-    point.x <= resizeX + buttonSize / 2 &&
-    point.y >= resizeY - buttonSize / 2 &&
-    point.y <= resizeY + buttonSize / 2
-  );
-}
-
-// Canvas 鼠标移动事件
 function onCanvasMouseMove(e: MouseEvent, pageIndex: number) {
   const coords = getCanvasCoordinates(e, pageIndex);
 
-  // 处理缩放
+  if (isRotating.value && rotateIcon.value) {
+    const dx = coords.x - rotateIcon.value.pointer.clientX;
+    const dy = coords.y - rotateIcon.value.pointer.clientY;
+    const currentAngle = Math.atan2(dy, dx);
+    const delta = currentAngle - rotateStartAngle.value;
+    rotateIcon.value.rotation = rotateStartRotation.value + delta * 180 / Math.PI;
+    redrawIcons(pageIndex);
+    return;
+  }
+
   if (isResizing.value && resizeIcon.value) {
     const dist = Math.sqrt(
-      Math.pow(coords.x - resizeIcon.value.pointer.clientX, 2) + 
+      Math.pow(coords.x - resizeIcon.value.pointer.clientX, 2) +
       Math.pow(coords.y - resizeIcon.value.pointer.clientY, 2)
     );
     const newSize = Math.max(20, resizeStartSize.value + (dist - resizeStartDist.value) * 2);
@@ -265,80 +270,75 @@ function onCanvasMouseMove(e: MouseEvent, pageIndex: number) {
     return;
   }
 
-  // 处理拖拽
   if (isDragging.value && selectedIcon.value) {
     selectedIcon.value.pointer.clientX = coords.x - dragOffset.value.x;
     selectedIcon.value.pointer.clientY = coords.y - dragOffset.value.y;
     redrawIcons(pageIndex);
     return;
   }
-
-  const pageIcons = icons.value.filter(icon => icon.pageIndex === pageIndex);
-  
-  let found = false;
-  let newHoveredIcon: StoreIcon | null = null;
-  for (const icon of pageIcons) {
-    if (isPointInIcon(coords, icon)) {
-      newHoveredIcon = icon;
-      found = true;
-      break;
-    }
-  }
-  
-  // 仅当悬停图标改变时才重绘
-  if (hoveredIcon.value !== newHoveredIcon) {
-    hoveredIcon.value = newHoveredIcon;
-    redrawIcons(pageIndex);
-  }
 }
 
-// Canvas 鼠标离开事件
 function onCanvasMouseLeave() {
-  hoveredIcon.value = null;
+  // selection persists, no auto-deselect
 }
 
-// Canvas 鼠标按下事件
 function onCanvasMouseDown(e: MouseEvent, pageIndex: number) {
   const coords = getCanvasCoordinates(e, pageIndex);
   const pageIcons = icons.value.filter(icon => icon.pageIndex === pageIndex);
-  
-  for (const icon of pageIcons) {
-    // 优先检查删除按钮
-    if (isPointOnDeleteButton(coords, icon)) {
-      deleteIcon(icon);
+
+  const sel = selectedIcon.value;
+  if (sel && sel.pageIndex === pageIndex) {
+    const action = hitCornerButton(coords, sel);
+    if (action === 'delete') {
+      deleteIcon(sel);
       return;
     }
-    
-    // 然后检查缩放按钮
-    if (isPointOnResizeButton(coords, icon)) {
+    if (action === 'rotate') {
+      isRotating.value = true;
+      rotateIcon.value = sel;
+      rotateStartRotation.value = sel.rotation ?? 0;
+      const dx = coords.x - sel.pointer.clientX;
+      const dy = coords.y - sel.pointer.clientY;
+      rotateStartAngle.value = Math.atan2(dy, dx);
+      return;
+    }
+    if (action === 'resize') {
       isResizing.value = true;
-      resizeIcon.value = icon;
-      resizeStartSize.value = getIconSize(icon);
+      resizeIcon.value = sel;
+      resizeStartSize.value = getIconSize(sel);
       resizeStartDist.value = Math.sqrt(
-        Math.pow(coords.x - icon.pointer.clientX, 2) + 
-        Math.pow(coords.y - icon.pointer.clientY, 2)
+        Math.pow(coords.x - sel.pointer.clientX, 2) +
+        Math.pow(coords.y - sel.pointer.clientY, 2)
       );
       return;
     }
-    
-    // 最后检查 icon 主体
-    if (isPointInIcon(coords, icon)) {
+    if (isPointInIcon(coords, sel)) {
       isDragging.value = true;
-      selectedIcon.value = icon;
-      dragOffset.value = {
-        x: coords.x - icon.pointer.clientX,
-        y: coords.y - icon.pointer.clientY,
-      };
+      dragOffset.value = { x: coords.x - sel.pointer.clientX, y: coords.y - sel.pointer.clientY };
       return;
     }
   }
+
+  for (const icon of pageIcons) {
+    if (isPointInIcon(coords, icon)) {
+      selectedIcon.value = icon;
+      isDragging.value = true;
+      dragOffset.value = { x: coords.x - icon.pointer.clientX, y: coords.y - icon.pointer.clientY };
+      redrawIcons(pageIndex);
+      return;
+    }
+  }
+
+  selectedIcon.value = null;
+  redrawIcons(pageIndex);
 }
 
-// Canvas 鼠标抬起事件
 function onCanvasMouseUp() {
   isDragging.value = false;
   isResizing.value = false;
+  isRotating.value = false;
   resizeIcon.value = null;
+  rotateIcon.value = null;
 }
 
 // 删除 icon
@@ -348,7 +348,7 @@ function deleteIcon(icon: StoreIcon) {
     icons.value.splice(index, 1);
     redrawIcons(icon.pageIndex);
   }
-  hoveredIcon.value = null;
+  if (selectedIcon.value === icon) selectedIcon.value = null;
 }
 
 // 重新绘制 overlay canvas 上的 icon
@@ -362,15 +362,9 @@ function redrawIcons(pageIndex: number) {
   // 清空 overlay canvas
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  // 获取样式缩放比例
-  const rect = canvas.getBoundingClientRect();
-  const scaleX = canvas.width / rect.width;
-  const scaleY = canvas.height / rect.height;
-
-  // 绘制该页的所有 icon
   const pageIcons = icons.value.filter(icon => icon.pageIndex === pageIndex);
   for (const icon of pageIcons) {
-    drawIcon(ctx, icon, scaleX, scaleY, icon === selectedIcon.value, icon === hoveredIcon.value);
+    drawIcon(ctx, icon, icon === selectedIcon.value);
   }
 }
 
@@ -463,45 +457,88 @@ function checkIconConditions(icon: StoreIcon): boolean {
   return checkConditions(icon.conditions, icon.matchMode);
 }
 
-// 辅助函数：绘制删除和缩放按钮
-function drawHoverButtons(ctx: CanvasRenderingContext2D, x: number, y: number, size: number): void {
-  const halfSize = size / 2;
-  const buttonRadius = 9;
-  
-  // 删除按钮
-  ctx.fillStyle = "#ff4444";
-  ctx.beginPath();
-  ctx.arc(x - halfSize, y - halfSize, buttonRadius, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = "#fff";
-  ctx.font = "bold 14px Arial";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText("✕", x - halfSize, y - halfSize);
-
-  // 缩放按钮
-  ctx.fillStyle = "#4444ff";
-  ctx.beginPath();
-  ctx.arc(x + halfSize, y + halfSize, buttonRadius, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = "#fff";
-  ctx.fillText("⇲", x + halfSize, y + halfSize);
+function getIconBounds(icon: StoreIcon): { halfW: number; halfH: number } {
+  const s = getIconSize(icon);
+  if (icon.option.type === 'field') {
+    const fontFamily = icon.option.fontFamily || '微软雅黑';
+    const fontSize = Math.max(8, Math.floor(s * 0.3));
+    const fieldValue = getFieldValue(icon.option.fieldName || '');
+    const charCount = fieldValue.length || 1;
+    const halfW = Math.max(14, Math.floor(fontSize * charCount * 0.45));
+    const halfH = Math.max(8, Math.floor(fontSize * 0.5));
+    return { halfW, halfH };
+  }
+  if (icon.option.type === 'image') {
+    return { halfW: s * 0.4, halfH: s * 0.4 };
+  }
+  return { halfW: s / 2, halfH: s / 2 };
 }
 
-// 绘制单个 icon
-function drawIcon(ctx: CanvasRenderingContext2D, icon: StoreIcon, scaleX: number, scaleY: number, isSelected: boolean, isHovered: boolean) {
+function drawCornerButtons(ctx: CanvasRenderingContext2D, icon: StoreIcon, bounds: { halfW: number; halfH: number }) {
+  const x = icon.pointer.clientX;
+  const y = icon.pointer.clientY;
+  const rotation = icon.rotation ?? 0;
+
+  const hw = bounds.halfW + BTN_PAD + BTN_R;
+  const hh = bounds.halfH + BTN_PAD + BTN_R;
+
+  const tl = rotatePoint(-hw, -hh, rotation);
+  const tr = rotatePoint(hw, -hh, rotation);
+  const br = rotatePoint(hw, hh, rotation);
+
+  const btns: { cx: number; cy: number; color: string; glyph: string }[] = [
+    { cx: x + tl.x, cy: y + tl.y, color: '#ef4444', glyph: '\u2715' },
+    { cx: x + tr.x, cy: y + tr.y, color: '#4f8cff', glyph: '\u21BB' },
+    { cx: x + br.x, cy: y + br.y, color: '#10b981', glyph: '\u21C5' },
+  ];
+
+  for (const b of btns) {
+    ctx.beginPath();
+    ctx.arc(b.cx, b.cy, BTN_R, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.93)';
+    ctx.shadowColor = 'rgba(0,0,0,0.15)';
+    ctx.shadowBlur = 4;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 1;
+    ctx.fill();
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetY = 0;
+    ctx.strokeStyle = b.color;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.fillStyle = b.color;
+    ctx.font = `bold ${BTN_R - 1}px system-ui`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(b.glyph, b.cx, b.cy + 0.5);
+  }
+}
+
+function rotatePoint(px: number, py: number, deg: number): { x: number; y: number } {
+  if (!deg) return { x: px, y: py };
+  const rad = deg * Math.PI / 180;
+  const cos = Math.cos(rad), sin = Math.sin(rad);
+  return { x: px * cos - py * sin, y: px * sin + py * cos };
+}
+
+function drawIcon(ctx: CanvasRenderingContext2D, icon: StoreIcon, isSelected: boolean) {
   const x = icon.pointer.clientX;
   const y = icon.pointer.clientY;
   const size = getIconSize(icon);
+  const rotation = icon.rotation ?? 0;
 
-  // 检查是否应该绘制内容（single 模式总是绘制，conditional 模式需要检查条件）
   const shouldDraw = icon.mode === 'single' || checkIconConditions(icon);
 
   if (shouldDraw) {
-    const fontFamily = icon.option.fontFamily || '微软雅黑';
-    const fontSize = Math.max(8, Math.floor(size * 0.3));
-    
+    ctx.save();
+    ctx.translate(x, y);
+    if (rotation !== 0) ctx.rotate(rotation * Math.PI / 180);
+
     if (icon.option.type === 'field') {
+      const fontFamily = icon.option.fontFamily || '微软雅黑';
+      const fontSize = Math.max(8, Math.floor(size * 0.3));
       drawFieldText(ctx,
         icon.option.fieldName || '',
         fontFamily,
@@ -509,26 +546,45 @@ function drawIcon(ctx: CanvasRenderingContext2D, icon: StoreIcon, scaleX: number
         icon.option.fontWeight ?? 400,
         icon.option.opacity ?? 1,
         icon.option.color ?? '#000000',
-        x, y
+        0, 0
       );
     } else if (icon.option.type === 'image') {
-      drawImageIcon(ctx, icon.option.src || '', x, y, size, icon.pageIndex);
+      drawImageIcon(ctx, icon.option.src || '', 0, 0, size, icon.pageIndex);
     } else if (icon.option.type === 'icon') {
-      const iconFontFamily = 'Segoe UI Symbol';
       const iconFontSize = Math.max(12, Math.floor(size * 0.8));
       ctx.globalAlpha = icon.option.opacity ?? 1;
       ctx.fillStyle = icon.option.color ?? '#000000';
-      ctx.font = `${iconFontSize}px "${iconFontFamily}", "Segoe UI Symbol"`;
+      ctx.font = `${iconFontSize}px "Segoe UI Symbol"`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(icon.option.icon || '', x, y);
+      ctx.fillText(icon.option.icon || '', 0, 0);
       ctx.globalAlpha = 1;
     }
+
+    ctx.restore();
   }
 
-  // 只在悬停时显示删除和缩放按钮
-  if (isHovered) {
-    drawHoverButtons(ctx, x, y, size);
+  if (isSelected) {
+    const bounds = getIconBounds(icon);
+    if (rotation !== 0) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(rotation * Math.PI / 180);
+      ctx.strokeStyle = 'rgba(79,140,255,0.35)';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([5, 3]);
+      ctx.strokeRect(-bounds.halfW - 2, -bounds.halfH - 2, (bounds.halfW + 2) * 2, (bounds.halfH + 2) * 2);
+      ctx.setLineDash([]);
+      ctx.restore();
+    } else {
+      ctx.strokeStyle = 'rgba(79,140,255,0.35)';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([5, 3]);
+      ctx.strokeRect(x - bounds.halfW - 2, y - bounds.halfH - 2, (bounds.halfW + 2) * 2, (bounds.halfH + 2) * 2);
+      ctx.setLineDash([]);
+    }
+
+    drawCornerButtons(ctx, icon, bounds);
   }
 }
 

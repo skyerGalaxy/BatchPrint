@@ -1,7 +1,10 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, watch } from 'vue';
 import { useBPStore } from '@/stores/bpstore';
 import { getFontsList, getFontValueByName } from '@/utils/fontLoader';
+import { open } from '@tauri-apps/plugin-dialog';
+import { readFile, writeFile, exists, mkdir, readDir, remove } from '@tauri-apps/plugin-fs';
+import { convertFileSrc } from '@tauri-apps/api/core';
 
 interface Font {
   name: string;
@@ -175,6 +178,14 @@ onMounted(async () => {
     fontDisplayNames.value = fontOptions.value.map(f => f.name);
     fontFamily.value = fontOptions.value[0].value;
   }
+
+  if (bpStore.dataPath) {
+    await refreshImageLists();
+  }
+});
+
+watch(() => bpStore.dataPath, async (newPath) => {
+  if (newPath) await refreshImageLists();
 });
 
 
@@ -184,8 +195,31 @@ function selectImage(type: 'signature' | 'seal', index: number) {
   const list = type === 'signature' ? bpStore.imageList_signature : bpStore.imageList_seal;
   emits('select_option', {
     type: 'image',
-    src: list[index] ?? ''
+    src: list[index] ?? '',
+    size: size.value,
   });
+}
+
+function applyImageSize(val: number) {
+  imageSizeCustom.value = false;
+  size.value = val;
+  emitImageSize();
+}
+
+function emitImageSize() {
+  if (selectedImageType.value && selectedImageIndex.value !== null) {
+    const list = selectedImageType.value === 'signature' ? bpStore.imageList_signature : bpStore.imageList_seal;
+    emits('select_option', {
+      type: 'image',
+      src: list[selectedImageIndex.value] ?? '',
+      size: size.value,
+    });
+  }
+}
+
+function onCustomSizeInput() {
+  imageSizeCustom.value = true;
+  emitImageSize();
 }
 
 async function selectField(fieldName: string | null = null) {
@@ -214,6 +248,93 @@ function selectIcon(char: string) {
     opacity: opacity.value,
     size: size.value,
   });
+}
+
+const imageSizePresets = [80, 120, 150, 200];
+const imageSizeCustom = ref(false);
+const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'];
+
+async function loadImagesFromDir(dirPath: string): Promise<string[]> {
+  try {
+    if (!await exists(dirPath)) return [];
+    const files = await readDir(dirPath);
+    return files
+      .filter(file => file.isFile)
+      .map(file => file.name)
+      .filter(name => imageExtensions.some(ext => name.toLowerCase().endsWith(ext)))
+      .map(name => convertFileSrc(`${dirPath}/${name}`));
+  } catch (error) {
+    console.error(`无法读取图片目录 ${dirPath}:`, error);
+    return [];
+  }
+}
+
+async function refreshImageLists() {
+  if (!bpStore.dataPath) return;
+  const [sig, seal] = await Promise.all([
+    loadImagesFromDir(`${bpStore.dataPath}/signImg`),
+    loadImagesFromDir(`${bpStore.dataPath}/sealImg`),
+  ]);
+  bpStore.imageList_signature = sig;
+  bpStore.imageList_seal = seal;
+}
+
+async function addImage(type: 'signature' | 'seal') {
+  try {
+    const selected = await open({
+      multiple: true,
+      filters: [{ name: '图片', extensions: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'] }],
+    });
+    if (!selected) return;
+
+    const files = Array.isArray(selected) ? selected : [selected];
+    const subDir = type === 'signature' ? 'signImg' : 'sealImg';
+    const targetDir = `${bpStore.dataPath}/${subDir}`;
+
+    if (!await exists(targetDir)) {
+      await mkdir(targetDir, { recursive: true });
+    }
+
+    for (const filePath of files) {
+      const fileData = await readFile(filePath);
+      const fileName = filePath.split('\\').pop() || filePath.split('/').pop() || 'image';
+      let targetPath = `${targetDir}/${fileName}`;
+      if (await exists(targetPath)) {
+        const timestamp = Date.now();
+        const dotIndex = fileName.lastIndexOf('.');
+        if (dotIndex > 0) {
+          targetPath = `${targetDir}/${fileName.substring(0, dotIndex)}_${timestamp}${fileName.substring(dotIndex)}`;
+        } else {
+          targetPath = `${targetDir}/${fileName}_${timestamp}`;
+        }
+      }
+      await writeFile(targetPath, fileData);
+    }
+
+    await refreshImageLists();
+  } catch (error) {
+    console.error('上传图片失败:', error);
+  }
+}
+
+async function deleteImage(type: 'signature' | 'seal', index: number) {
+  try {
+    const subDir = type === 'signature' ? 'signImg' : 'sealImg';
+    const dirPath = `${bpStore.dataPath}/${subDir}`;
+    const files = await readDir(dirPath);
+    const entries = files
+      .filter(f => f.isFile && imageExtensions.some(ext => f.name.toLowerCase().endsWith(ext)));
+    if (index >= 0 && index < entries.length) {
+      await remove(`${dirPath}/${entries[index].name}`);
+      if (selectedImageType.value === type && selectedImageIndex.value === index) {
+        selectedImageType.value = null;
+        selectedImageIndex.value = null;
+      }
+      await refreshImageLists();
+    }
+  } catch (error) {
+    console.error('删除图片失败:', error);
+  }
 }
 </script>
 
@@ -352,44 +473,100 @@ function selectIcon(char: string) {
       </div>
 
       <div v-else-if="activeNav === 'signature'" class="mp-image-panel">
-        <div v-if="bpStore.imageList_signature.length === 0" class="mp-empty">
-          <v-icon size="36" color="#cbd5e1">mdi-image-off-outline</v-icon>
-          <p>暂无签名，请先在素材库中添加</p>
-        </div>
-        <div v-else class="mp-image-grid">
-          <div
-            v-for="(imgSrc, index) in bpStore.imageList_signature"
-            :key="index"
-            class="mp-image-card"
-            :class="{ selected: selectedImageType === 'signature' && selectedImageIndex === index }"
-            @click="selectImage('signature', index)"
-          >
-            <v-img :src="imgSrc" aspect-ratio="1" cover class="mp-image-thumb" />
-            <div v-if="selectedImageType === 'signature' && selectedImageIndex === index" class="mp-check-badge">
-              <v-icon size="14" color="#fff">mdi-check</v-icon>
+        <div class="mp-image-grid">
+          <div class="mp-image-wrap" v-for="(imgSrc, index) in bpStore.imageList_signature" :key="index">
+            <div
+              class="mp-image-card"
+              :class="{ selected: selectedImageType === 'signature' && selectedImageIndex === index }"
+              @click="selectImage('signature', index)"
+            >
+              <img :src="imgSrc" />
+              <div class="mp-delete-btn" @click.stop="deleteImage('signature', index)" title="删除">
+                <v-icon size="12">mdi-close</v-icon>
+              </div>
+              <div v-if="selectedImageType === 'signature' && selectedImageIndex === index" class="mp-check-badge">
+                <v-icon size="14" color="#fff">mdi-check</v-icon>
+              </div>
             </div>
           </div>
+          <div class="mp-image-wrap">
+            <div class="mp-image-card mp-add-card" @click="addImage('signature')">
+              <v-icon size="28" color="#94a3b8">mdi-plus</v-icon>
+            </div>
+          </div>
+        </div>
+
+        <div class="mp-size-bar">
+          <span class="mp-size-label">大小</span>
+          <div class="mp-size-presets">
+            <button
+              v-for="preset in imageSizePresets"
+              :key="preset"
+              class="mp-size-chip"
+              :class="{ active: !imageSizeCustom && size === preset }"
+              @click="applyImageSize(preset)"
+            >{{ preset }}</button>
+          </div>
+          <v-text-field
+            v-model.number="size"
+            type="number"
+            density="compact"
+            variant="outlined"
+            hide-details
+            :min="20"
+            :max="400"
+            class="mp-size-input"
+            @update:model-value="onCustomSizeInput"
+          />
         </div>
       </div>
 
       <div v-else-if="activeNav === 'seal'" class="mp-image-panel">
-        <div v-if="bpStore.imageList_seal.length === 0" class="mp-empty">
-          <v-icon size="36" color="#cbd5e1">mdi-image-off-outline</v-icon>
-          <p>暂无印章，请先在素材库中添加</p>
-        </div>
-        <div v-else class="mp-image-grid">
-          <div
-            v-for="(imgSrc, index) in bpStore.imageList_seal"
-            :key="index"
-            class="mp-image-card"
-            :class="{ selected: selectedImageType === 'seal' && selectedImageIndex === index }"
-            @click="selectImage('seal', index)"
-          >
-            <v-img :src="imgSrc" aspect-ratio="1" cover class="mp-image-thumb" />
-            <div v-if="selectedImageType === 'seal' && selectedImageIndex === index" class="mp-check-badge">
-              <v-icon size="14" color="#fff">mdi-check</v-icon>
+        <div class="mp-image-grid">
+          <div class="mp-image-wrap" v-for="(imgSrc, index) in bpStore.imageList_seal" :key="index">
+            <div
+              class="mp-image-card"
+              :class="{ selected: selectedImageType === 'seal' && selectedImageIndex === index }"
+              @click="selectImage('seal', index)"
+            >
+              <img :src="imgSrc" />
+              <div class="mp-delete-btn" @click.stop="deleteImage('seal', index)" title="删除">
+                <v-icon size="12">mdi-close</v-icon>
+              </div>
+              <div v-if="selectedImageType === 'seal' && selectedImageIndex === index" class="mp-check-badge">
+                <v-icon size="14" color="#fff">mdi-check</v-icon>
+              </div>
             </div>
           </div>
+          <div class="mp-image-wrap">
+            <div class="mp-image-card mp-add-card" @click="addImage('seal')">
+              <v-icon size="28" color="#94a3b8">mdi-plus</v-icon>
+            </div>
+          </div>
+        </div>
+
+        <div class="mp-size-bar">
+          <span class="mp-size-label">大小</span>
+          <div class="mp-size-presets">
+            <button
+              v-for="preset in imageSizePresets"
+              :key="preset"
+              class="mp-size-chip"
+              :class="{ active: !imageSizeCustom && size === preset }"
+              @click="applyImageSize(preset)"
+            >{{ preset }}</button>
+          </div>
+          <v-text-field
+            v-model.number="size"
+            type="number"
+            density="compact"
+            variant="outlined"
+            hide-details
+            :min="20"
+            :max="400"
+            class="mp-size-input"
+            @update:model-value="onCustomSizeInput"
+          />
         </div>
       </div>
 
@@ -723,44 +900,60 @@ function selectIcon(char: string) {
 /* ========= image panel ========= */
 .mp-image-panel {
   height: 100%;
-  overflow-y: auto;
-}
-
-.mp-empty {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  color: #94a3b8;
-  font-size: 12.5px;
-  gap: 8px;
+  gap: 10px;
+  overflow: hidden;
 }
 
-.mp-empty p {
-  margin: 0;
+.mp-image-panel .mp-image-grid {
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 4px;
 }
 
 .mp-image-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-content: flex-start;
+}
+
+.mp-image-wrap {
+  width: calc((100% - 16px) / 3);
+  position: relative;
+}
+
+.mp-image-wrap::before {
+  content: '';
+  display: block;
+  padding-bottom: 100%;
 }
 
 .mp-image-card {
-  position: relative;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
   cursor: pointer;
   border-radius: 12px;
-  overflow: hidden;
   border: 2px solid transparent;
   opacity: 0.5;
-  transition: all 0.2s ease;
-  aspect-ratio: 1;
+  transition: opacity 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+  overflow: hidden;
+  background: #f1f5f9;
+}
+
+.mp-image-card img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 10px;
 }
 
 .mp-image-card:hover {
   opacity: 0.8;
-  transform: scale(1.03);
   box-shadow: 0 4px 12px rgba(0,0,0,0.08);
 }
 
@@ -772,11 +965,6 @@ function selectIcon(char: string) {
 
 .mp-image-card.selected:hover {
   opacity: 1;
-}
-
-.mp-image-thumb {
-  width: 100%;
-  height: 100%;
 }
 
 .mp-check-badge {
@@ -791,6 +979,123 @@ function selectIcon(char: string) {
   align-items: center;
   justify-content: center;
   box-shadow: 0 2px 6px rgba(79,140,255,0.4);
+}
+
+.mp-delete-btn {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(239, 68, 68, 0.82);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  cursor: pointer;
+  z-index: 2;
+}
+
+.mp-image-card:hover .mp-delete-btn {
+  opacity: 1;
+}
+
+.mp-delete-btn:hover {
+  background: #ef4444;
+  transform: scale(1.15);
+}
+
+.mp-add-card {
+  opacity: 1;
+  border: 2px dashed #cbd5e1;
+  background: #f8fafc;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mp-add-card:hover {
+  border-color: #4f8cff;
+  background: rgba(79, 140, 255, 0.04);
+  opacity: 1;
+  box-shadow: 0 4px 12px rgba(79, 140, 255, 0.1);
+}
+
+/* ========= image size bar ========= */
+.mp-size-bar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: #f8fafc;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.mp-size-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #94a3b8;
+  flex-shrink: 0;
+}
+
+.mp-size-presets {
+  display: flex;
+  gap: 4px;
+  flex: 1;
+}
+
+.mp-size-chip {
+  flex: 1;
+  height: 28px;
+  border: 1.5px solid #e2e8f0;
+  background: #fff;
+  border-radius: 14px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #64748b;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  padding: 0 6px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mp-size-chip:hover {
+  border-color: #4f8cff;
+  color: #4f8cff;
+}
+
+.mp-size-chip.active {
+  background: linear-gradient(135deg, #4f8cff, #6366f1);
+  border-color: #4f8cff;
+  color: #fff;
+  font-weight: 600;
+  box-shadow: 0 1px 4px rgba(79, 140, 255, 0.3);
+}
+
+.mp-size-input {
+  width: 64px;
+  flex-shrink: 0;
+}
+
+.mp-size-input :deep(.v-field) {
+  border-radius: 8px !important;
+  border-color: #e2e8f0 !important;
+}
+
+.mp-size-input :deep(.v-field__input) {
+  font-size: 12px !important;
+  padding: 4px 8px !important;
+  min-height: auto !important;
+  text-align: center;
 }
 
 /* ========= shared ========= */
