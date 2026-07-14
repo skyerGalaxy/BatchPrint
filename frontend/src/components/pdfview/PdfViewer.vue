@@ -513,6 +513,16 @@ function drawIcon(ctx: CanvasRenderingContext2D, icon: StoreIcon, scaleX: number
       );
     } else if (icon.option.type === 'image') {
       drawImageIcon(ctx, icon.option.src || '', x, y, size, icon.pageIndex);
+    } else if (icon.option.type === 'icon') {
+      const iconFontFamily = 'Segoe UI Symbol';
+      const iconFontSize = Math.max(12, Math.floor(size * 0.8));
+      ctx.globalAlpha = icon.option.opacity ?? 1;
+      ctx.fillStyle = icon.option.color ?? '#000000';
+      ctx.font = `${iconFontSize}px "${iconFontFamily}", "Segoe UI Symbol"`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(icon.option.icon || '', x, y);
+      ctx.globalAlpha = 1;
     }
   }
 

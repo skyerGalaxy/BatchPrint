@@ -20,6 +20,7 @@ const navItems = [
   { title: '表格', value: 'table', icon: 'mdi-table' },
   { title: '签字', value: 'signature', icon: 'mdi-draw-pen' },
   { title: '印章', value: 'seal', icon: 'mdi-seal-variant' },
+  { title: '图标', value: 'icon', icon: 'mdi-shape-outline' },
 ];
 
 const selectedImageType = ref<'signature' | 'seal' | null>(null);
@@ -37,6 +38,123 @@ const fontWeight = ref(400);
 const opacity = ref(1);
 const color = ref('#000000');
 const colorMenu = ref(false);
+
+const iconChar = ref('✓');
+const iconGroup = ref('marks');
+const iconGroups = [
+  {
+    value: 'marks',
+    label: '复选框',
+    icons: [
+      { char: '☐', label: '空方框' },
+      { char: '☑', label: '勾选方框' },
+      { char: '☒', label: '叉选方框' },
+      { char: '✓', label: '对勾' },
+      { char: '✗', label: '叉号' },
+      { char: '✔', label: '粗对勾' },
+      { char: '✘', label: '粗叉号' },
+      { char: '●', label: '实心圆' },
+    ],
+  },
+  {
+    value: 'stars',
+    label: '星形',
+    icons: [
+      { char: '★', label: '实心星' },
+      { char: '☆', label: '空心星' },
+      { char: '✦', label: '四角星' },
+      { char: '✧', label: '空心四角' },
+      { char: '◆', label: '实心菱形' },
+      { char: '◇', label: '空心菱形' },
+      { char: '■', label: '实心方块' },
+      { char: '□', label: '空心方块' },
+    ],
+  },
+  {
+    value: 'arrows',
+    label: '箭头',
+    icons: [
+      { char: '→', label: '右箭头' },
+      { char: '←', label: '左箭头' },
+      { char: '↑', label: '上箭头' },
+      { char: '↓', label: '下箭头' },
+      { char: '↔', label: '左右箭头' },
+      { char: '↕', label: '上下箭头' },
+      { char: '▶', label: '右三角' },
+      { char: '◀', label: '左三角' },
+    ],
+  },
+  {
+    value: 'shapes',
+    label: '图形',
+    icons: [
+      { char: '▲', label: '实心三角' },
+      { char: '△', label: '空心三角' },
+      { char: '▼', label: '倒三角' },
+      { char: '▽', label: '空心倒三角' },
+      { char: '○', label: '空心圆' },
+      { char: '♥', label: '红心' },
+      { char: '♦', label: '方块' },
+      { char: '♣', label: '梅花' },
+    ],
+  },
+  {
+    value: 'office',
+    label: '办公',
+    icons: [
+      { char: '☎', label: '电话' },
+      { char: '✉', label: '信封' },
+      { char: '✎', label: '铅笔' },
+      { char: '⌂', label: '房子' },
+      { char: '⌘', label: '命令键' },
+      { char: '⏎', label: '回车' },
+      { char: '⌫', label: '退格' },
+      { char: '☺', label: '笑脸' },
+    ],
+  },
+  {
+    value: 'info',
+    label: '提示',
+    icons: [
+      { char: '⚡', label: '闪电' },
+      { char: '⚠', label: '警告' },
+      { char: 'ℹ', label: '信息' },
+      { char: '©', label: '版权' },
+      { char: '®', label: '注册商标' },
+      { char: '™', label: '商标' },
+      { char: '♻', label: '回收' },
+      { char: '☹', label: '哭脸' },
+    ],
+  },
+  {
+    value: 'math',
+    label: '数学',
+    icons: [
+      { char: '≤', label: '小于等于' },
+      { char: '≥', label: '大于等于' },
+      { char: '±', label: '正负号' },
+      { char: '×', label: '乘号' },
+      { char: '÷', label: '除号' },
+      { char: '√', label: '根号' },
+      { char: '∞', label: '无穷' },
+      { char: '∑', label: '求和' },
+    ],
+  },
+  {
+    value: 'weather',
+    label: '天气',
+    icons: [
+      { char: '☀', label: '太阳' },
+      { char: '☁', label: '云' },
+      { char: '☂', label: '雨伞' },
+      { char: '❄', label: '雪花' },
+      { char: '♪', label: '音符' },
+      { char: '♫', label: '双音符' },
+      { char: '≠', label: '不等号' },
+      { char: '≈', label: '约等于' },
+    ],
+  },
+];
 
 onMounted(async () => {
   try {
@@ -84,6 +202,17 @@ async function selectField(fieldName: string | null = null) {
     opacity: opacity.value,
     color: color.value,
     size: size.value
+  });
+}
+
+function selectIcon(char: string) {
+  iconChar.value = char;
+  emits('select_option', {
+    type: 'icon',
+    icon: char,
+    color: color.value,
+    opacity: opacity.value,
+    size: size.value,
   });
 }
 </script>
@@ -261,6 +390,96 @@ async function selectField(fieldName: string | null = null) {
               <v-icon size="14" color="#fff">mdi-check</v-icon>
             </div>
           </div>
+        </div>
+      </div>
+
+      <div v-else-if="activeNav === 'icon'" class="mp-icon-panel">
+        <div class="mp-icon-groups">
+          <v-chip-group v-model="iconGroup" selected-class="text-primary" column>
+            <v-chip
+              v-for="group in iconGroups"
+              :key="group.value"
+              :value="group.value"
+              variant="tonal"
+              size="small"
+              filter
+            >{{ group.label }}</v-chip>
+          </v-chip-group>
+        </div>
+
+        <div class="mp-icon-grid">
+          <div
+            v-for="icon in (iconGroups.find(g => g.value === iconGroup) || iconGroups[0]).icons"
+            :key="icon.char"
+            class="mp-icon-cell"
+            :class="{ selected: iconChar === icon.char }"
+            @click="selectIcon(icon.char)"
+          >
+            <span
+              class="mp-icon-char"
+              :style="{ color: iconChar === icon.char ? color : '#334155' }"
+            >{{ icon.char }}</span>
+            <span class="mp-icon-label">{{ icon.label }}</span>
+          </div>
+        </div>
+
+        <div class="mp-icon-controls">
+          <div class="mp-ctrl-row">
+            <v-icon size="16" color="#94a3b8">mdi-format-size</v-icon>
+            <v-text-field
+              v-model.number="size"
+              type="number"
+              density="compact"
+              variant="outlined"
+              hide-details
+              :min="16"
+              :max="200"
+              class="bento-select"
+              @update:model-value="() => selectIcon(iconChar)"
+            />
+          </div>
+          <div class="mp-ctrl-row">
+            <v-icon size="16" color="#94a3b8">mdi-opacity</v-icon>
+            <v-slider
+              v-model="opacity"
+              density="compact"
+              hide-details
+              :min="0.1"
+              :max="1"
+              :step="0.05"
+              thumb-size="16"
+              track-size="3"
+              class="bento-slider"
+              @update:model-value="() => selectIcon(iconChar)"
+            />
+          </div>
+          <div class="mp-ctrl-row">
+            <v-icon size="16" color="#94a3b8">mdi-palette</v-icon>
+            <v-menu v-model="colorMenu" :close-on-content-click="false" offset="8">
+              <template #activator="{ props: menuProps }">
+                <div class="color-swatch" :style="{ background: color }" v-bind="menuProps"></div>
+              </template>
+              <v-color-picker
+                v-model="color"
+                mode="hex"
+                hide-inputs
+                @update:model-value="selectIcon(iconChar); colorMenu = false"
+              />
+            </v-menu>
+            <span class="color-hex">{{ color }}</span>
+          </div>
+        </div>
+
+        <div class="mp-preview-box">
+          <span class="mp-preview-label">预览</span>
+          <span
+            class="mp-icon-preview"
+            :style="{
+              fontSize: Math.min(size, 48) + 'px',
+              opacity: opacity,
+              color: color
+            }"
+          >{{ iconChar }}</span>
         </div>
       </div>
     </div>
@@ -590,6 +809,93 @@ async function selectField(fieldName: string | null = null) {
 
 .section-label-icon {
   flex-shrink: 0;
+}
+
+/* ========= icon panel ========= */
+.mp-icon-panel {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.mp-icon-groups {
+  flex-shrink: 0;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.mp-icon-groups :deep(.v-slide-group__content) {
+  gap: 4px;
+}
+
+.mp-icon-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.mp-icon-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 8px 4px 4px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.16s ease;
+  border: 1.5px solid transparent;
+  background: #f8fafc;
+  min-height: 56px;
+}
+
+.mp-icon-cell:hover {
+  background: #f1f5f9;
+  border-color: rgba(79, 140, 255, 0.2);
+}
+
+.mp-icon-cell.selected {
+  background: linear-gradient(135deg, rgba(79, 140, 255, 0.08), rgba(108, 92, 231, 0.05));
+  border-color: rgba(79, 140, 255, 0.35);
+  box-shadow: 0 0 0 1px rgba(79, 140, 255, 0.15);
+}
+
+.mp-icon-char {
+  font-family: "Segoe UI Symbol", "Segoe UI Emoji", sans-serif;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.mp-icon-label {
+  font-size: 9px;
+  color: #94a3b8;
+  white-space: nowrap;
+  line-height: 1;
+}
+
+.mp-icon-cell.selected .mp-icon-label {
+  color: #4f8cff;
+}
+
+.mp-icon-controls {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 10px;
+  background: #f8fafc;
+  border: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.mp-icon-preview {
+  font-family: "Segoe UI Symbol", "Segoe UI Emoji", sans-serif;
+  line-height: 1;
 }
 
 /* ========= select / textfield refinements ========= */

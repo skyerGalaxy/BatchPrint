@@ -57,6 +57,14 @@ def register_custom_fonts():
 
     if os.name == "nt":
         windows_fonts_dir = Path(os.environ.get("WINDIR", "C:\\Windows")) / "Fonts"
+
+        seguisym_path = windows_fonts_dir / "seguisym.ttf"
+        if seguisym_path.exists() and "Segoe UI Symbol" not in pdfmetrics.getRegisteredFontNames():
+            try:
+                pdfmetrics.registerFont(TTFont("Segoe UI Symbol", str(seguisym_path)))
+            except Exception as error:
+                print(f"注册 Segoe UI Symbol 失败: {error}")
+
         for font in data.get("fonts", []):
             font_name = font.get("value") or font.get("name")
             font_type = font.get("type")
@@ -167,6 +175,16 @@ async def generate_batch_pdf(
     
     register_custom_fonts()
     
+    user_fonts_dir = Path(path) / "fonts" if path else None
+    if user_fonts_dir and user_fonts_dir.exists():
+        for font_file in user_fonts_dir.glob("*.ttf"):
+            font_name = font_file.stem
+            if font_name not in pdfmetrics.getRegisteredFontNames():
+                try:
+                    pdfmetrics.registerFont(TTFont(font_name, str(font_file)))
+                except Exception as error:
+                    print(f"注册用户字体失败: {font_name}, {error}")
+    
     pdf_content = await pdf_file.read()
     pdf_reader = PdfReader(io.BytesIO(pdf_content))
     pdf_page_count = len(pdf_reader.pages)
@@ -249,13 +267,21 @@ async def generate_batch_pdf(
         return check_condition(row_data, conditions, match_mode)
     
     def _apply_font_style(c, font_family, font_weight, font_size, color_hex, item_opacity):
-        if font_weight >= 600:
+        def _safe_set_font(name, size):
             try:
-                c.setFont(font_family + "-Bold", font_size)
+                c.setFont(name, size)
+                return True
             except:
-                c.setFont(font_family, font_size)
+                return False
+
+        if font_weight >= 600:
+            bold_name = font_family + "-Bold"
+            if not _safe_set_font(bold_name, font_size):
+                if not _safe_set_font(font_family, font_size):
+                    _safe_set_font("微软雅黑", font_size)
         else:
-            c.setFont(font_family, font_size)
+            if not _safe_set_font(font_family, font_size):
+                _safe_set_font("微软雅黑", font_size)
 
         if item_opacity < 1.0:
             try:
@@ -328,6 +354,15 @@ async def generate_batch_pdf(
                             )
                         except Exception as e:
                             print(f"图片渲染失败: {local_path}, {e}")
+            
+            elif item_type == "icon":
+                icon_char = option.get("icon")
+                if icon_char:
+                    icon_color = option.get("color", "#000000")
+                    icon_opacity = option.get("opacity", 1.0)
+                    icon_size = max(12, size * 0.8)
+                    _apply_font_style(overlay_pdf, "Segoe UI Symbol", 400, icon_size, icon_color, icon_opacity)
+                    overlay_pdf.drawCentredString(x, y, icon_char)
         
         elif mode == "conditional":
             if evaluate_icon_conditions(row_data, icon_item):
@@ -375,6 +410,15 @@ async def generate_batch_pdf(
                                 )
                             except Exception as e:
                                 print(f"图片渲染失败: {local_path}, {e}")
+                
+                elif item_type == "icon":
+                    icon_char = option.get("icon")
+                    if icon_char:
+                        icon_color = option.get("color", "#000000")
+                        icon_opacity = option.get("opacity", 1.0)
+                        icon_size = max(12, size * 0.8)
+                        _apply_font_style(overlay_pdf, "Segoe UI Symbol", 400, icon_size, icon_color, icon_opacity)
+                        overlay_pdf.drawCentredString(x, y, icon_char)
     
     generated_files = []
     
