@@ -28,27 +28,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 获取项目根目录下的 fonts 路径
-def get_fonts_dir():
-    # 假设 backend 在项目根目录下
-    current_file = Path(__file__)
-    project_root = current_file.parent.parent
-    return project_root / "fonts"
 
 def register_custom_fonts():
-    fonts_dir = get_fonts_dir()
-    fonts_json = fonts_dir / "fonts.json"
-
-    if not fonts_json.exists():
-        return
-
-    try:
-        with open(fonts_json, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception as error:
-        print(f"读取字体配置失败: {error}")
-        return
-
     system_font_map = {
         "微软雅黑": "msyh.ttc",
         "宋体": "simsun.ttc",
@@ -65,69 +46,78 @@ def register_custom_fonts():
             except Exception as error:
                 print(f"注册 Segoe UI Symbol 失败: {error}")
 
-        for font in data.get("fonts", []):
-            font_name = font.get("value") or font.get("name")
-            font_type = font.get("type")
-            
-            if font_name in pdfmetrics.getRegisteredFontNames():
-                continue
-            
-            if font_type == "custom":
-                font_path = fonts_dir / font.get("file", "")
-                if font_path.exists():
-                    try:
-                        pdfmetrics.registerFont(TTFont(font_name, str(font_path)))
-                    except Exception as error:
-                        print(f"注册自定义字体失败: {font_name}, {error}")
-            
-            elif font_type == "system" and font_name in system_font_map:
-                font_file = system_font_map[font_name]
-                font_path = windows_fonts_dir / font_file
-                if font_path.exists():
-                    try:
-                        pdfmetrics.registerFont(TTFont(font_name, str(font_path)))
-                    except Exception as error:
-                        print(f"注册系统字体失败: {font_name}, {error}")
+        for font_path, font_name in [
+            ("wingdng2.ttf", "Wingdings 2"),
+            ("arial.ttf", "Arial"),
+            ("arialbd.ttf", "Arial-Bold"),
+        ]:
+            full_path = windows_fonts_dir / font_path
+            if full_path.exists() and font_name not in pdfmetrics.getRegisteredFontNames():
+                try:
+                    pdfmetrics.registerFont(TTFont(font_name, str(full_path)))
+                except Exception as error:
+                    print(f"注册字体 {font_name} 失败: {error}")
+
+        for font_name, font_file in system_font_map.items():
+            font_path = windows_fonts_dir / font_file
+            if font_path.exists() and font_name not in pdfmetrics.getRegisteredFontNames():
+                try:
+                    pdfmetrics.registerFont(TTFont(font_name, str(font_path)))
+                except Exception as error:
+                    print(f"注册系统字体失败: {font_name}, {error}")
+
+
+def register_user_fonts(fonts_dir_str: str):
+    if not fonts_dir_str:
+        return
+    user_dir = Path(fonts_dir_str)
+    if user_dir.exists():
+        for font_file in user_dir.glob("*.ttf"):
+            font_name = font_file.stem
+            if font_name not in pdfmetrics.getRegisteredFontNames():
+                try:
+                    pdfmetrics.registerFont(TTFont(font_name, str(font_file)))
+                except Exception as error:
+                    print(f"注册用户字体失败: {font_name}, {error}")
+
 
 @app.get("/api/fonts")
-async def get_fonts_list(request: Request):
-    """获取字体列表及其文件路径"""
-    fonts_dir = get_fonts_dir()
-    fonts_json = fonts_dir / "fonts.json"
-    
-    if not fonts_json.exists():
-        return {"fonts": []}
-    
-    with open(fonts_json, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    
-    # 为每个自定义字体添加文件信息
-    base_url = str(request.base_url).rstrip("/")
-    for font in data.get("fonts", []):
-        if font.get("type") == "custom" and "file" in font:
-            font_file = fonts_dir / font["file"]
-            if font_file.exists():
-                encoded_filename = quote(font["file"], safe='')
-                font["url"] = f"{base_url}/api/fonts/file/{encoded_filename}"
-    return data
+async def get_fonts_list(request: Request, fonts_path: str = None):
+    fonts: list = [
+        {"name": "微软雅黑", "value": "微软雅黑", "type": "system"},
+        {"name": "宋体", "value": "宋体", "type": "system"},
+        {"name": "黑体", "value": "黑体", "type": "system"},
+        {"name": "Arial", "value": "Arial", "type": "system"},
+        {"name": "Times New Roman", "value": "Times New Roman", "type": "system"},
+    ]
 
-@app.get("/api/fonts/file/{filename}")
-async def get_font_file(filename: str):
-    """获取字体文件(用于前端加载)"""
-    # 解码 URL 编码的文件名
-    decoded_filename = unquote(filename)
-    
-    fonts_dir = get_fonts_dir()
-    font_path = fonts_dir / decoded_filename
-    
-    # 安全检查,防止路径遍历攻击
-    if not font_path.exists() or not str(font_path).startswith(str(fonts_dir)):
+    base_url = str(request.base_url).rstrip("/")
+    if fonts_path:
+        user_fonts_dir = Path(fonts_path)
+        if user_fonts_dir.exists():
+            for font_file in user_fonts_dir.glob("*.ttf"):
+                font_name = font_file.stem
+                encoded_path = quote(str(font_file), safe='')
+                fonts.append({
+                    "name": font_name,
+                    "value": font_name,
+                    "type": "custom",
+                    "file": str(font_file),
+                    "url": f"{base_url}/api/fonts/file/user?path={encoded_path}",
+                })
+
+    return {"fonts": fonts}
+
+
+@app.get("/api/fonts/file/user")
+async def get_user_font_file(path: str):
+    font_path = Path(unquote(path))
+    if not font_path.exists() or not font_path.suffix.lower() == ".ttf":
         return {"error": "字体文件不存在"}
-    
     return FileResponse(
         font_path,
         media_type="application/octet-stream",
-        filename=decoded_filename
+        filename=font_path.name
     )
 
 def resolve_local_path_from_url(url: str) -> str:
@@ -174,16 +164,7 @@ async def generate_batch_pdf(
 ):
     
     register_custom_fonts()
-    
-    user_fonts_dir = Path(path) / "fonts" if path else None
-    if user_fonts_dir and user_fonts_dir.exists():
-        for font_file in user_fonts_dir.glob("*.ttf"):
-            font_name = font_file.stem
-            if font_name not in pdfmetrics.getRegisteredFontNames():
-                try:
-                    pdfmetrics.registerFont(TTFont(font_name, str(font_file)))
-                except Exception as error:
-                    print(f"注册用户字体失败: {font_name}, {error}")
+    register_user_fonts(str(Path(path) / "fonts") if path else None)
     
     pdf_content = await pdf_file.read()
     pdf_reader = PdfReader(io.BytesIO(pdf_content))

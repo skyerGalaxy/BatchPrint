@@ -30,3 +30,5 @@ const bpStore = useBPStore(pinia);
 await bpStore.initializeApp();
 
 app.mount('#app')
+
+document.addEventListener('contextmenu', e => e.preventDefault())

@@ -73,10 +73,12 @@
               rounded="lg"
               block
               class="generate-btn"
+              :loading="generating"
+              :disabled="generating"
               @click="generateBatchPDF"
             >
               <v-icon size="18" class="mr-2">mdi-file-document-multiple</v-icon>
-              生成 PDF
+              {{ generating ? '生成中...' : '生成 PDF' }}
             </v-btn>
           </div>
         </div>
@@ -89,6 +91,17 @@
               <v-icon size="20" color="primary" class="mr-2">mdi-eye-outline</v-icon>
               <span class="card-title">预览区</span>
             </div>
+            <v-chip
+              v-if="bpStore.iconList.length > 0"
+              variant="outlined"
+              size="small"
+              color="grey"
+              class="clear-chip"
+              @click="bpStore.iconList = []"
+            >
+              <v-icon start size="12">mdi-delete-outline</v-icon>
+              清空标注 ({{ bpStore.iconList.length }})
+            </v-chip>
           </div>
 
           <div class="preview-surface">
@@ -99,6 +112,42 @@
         </div>
       </v-col>
     </v-row>
+
+    <v-dialog v-model="resultDialog" max-width="440">
+      <v-card rounded="xl" elevation="8">
+        <v-card-item>
+          <div class="d-flex align-center">
+            <v-icon :color="resultSuccess ? 'success' : 'error'" size="28" class="mr-3">
+              {{ resultSuccess ? 'mdi-check-circle' : 'mdi-alert-circle' }}
+            </v-icon>
+            <v-card-title class="pa-0">
+              {{ resultSuccess ? '生成成功' : '生成失败' }}
+            </v-card-title>
+          </div>
+        </v-card-item>
+        <v-card-text>
+          <p class="text-body-2 mb-4">{{ resultMessage }}</p>
+          <div v-if="resultSuccess && resultPath" class="d-flex align-center ga-2">
+            <span class="text-caption text-grey-darken-1">输出目录：</span>
+            <code class="path-mono">{{ resultPath }}</code>
+          </div>
+        </v-card-text>
+        <v-card-actions>
+          <v-btn
+            v-if="resultSuccess && resultPath"
+            variant="tonal"
+            color="primary"
+            rounded="lg"
+            prepend-icon="mdi-folder-open-outline"
+            @click="openFolder(resultPath)"
+          >
+            打开目录
+          </v-btn>
+          <v-spacer></v-spacer>
+          <v-btn variant="text" rounded="lg" @click="resultDialog = false">确定</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
 
     <v-dialog v-model="mergedCellsDialog" max-width="480">
       <v-card>
@@ -124,6 +173,7 @@
 <script setup lang="ts">
 import axios from 'axios'
 import { ref, onMounted } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
 import PdfViewer from '@/components/pdfview/PdfViewer.vue'
 import { useBPStore } from '@/stores/bpstore'
 
@@ -132,6 +182,12 @@ const bpStore = useBPStore()
 
 const mergedCellsDialog = ref(false)
 const resetKey = ref(0)
+
+const generating = ref(false)
+const resultDialog = ref(false)
+const resultSuccess = ref(false)
+const resultMessage = ref('')
+const resultPath = ref('')
 
 onMounted(() => {
   if (bpStore.pdfSrc) {
@@ -182,14 +238,22 @@ const handleExcelChange = async (event: Event) => {
 
 const generateBatchPDF = async () => {
   if (!bpStore.pdfFile) {
-    alert('请先选择PDF模板')
+    resultSuccess.value = false
+    resultMessage.value = '请先选择PDF模板'
+    resultPath.value = ''
+    resultDialog.value = true
     return
   }
 
   if (!bpStore.excelFile) {
-    alert('请先选择Excel数据文件')
+    resultSuccess.value = false
+    resultMessage.value = '请先选择Excel数据文件'
+    resultPath.value = ''
+    resultDialog.value = true
     return
   }
+
+  generating.value = true
 
   try {
     const formData = new FormData()
@@ -202,10 +266,26 @@ const generateBatchPDF = async () => {
 
     const res = await axios.post('http://localhost:8000/generate_batch_pdf', formData)
 
-    alert('PDF批量生成成功！' + res.data.message)
+    resultSuccess.value = true
+    resultMessage.value = res.data.msg || 'PDF批量生成成功！'
+    resultPath.value = res.data.path || ''
+    resultDialog.value = true
   } catch (error) {
     console.error('生成PDF失败:', error)
-    alert('PDF批量生成出错，请查看浏览器控制台')
+    resultSuccess.value = false
+    resultMessage.value = 'PDF批量生成出错，请查看浏览器控制台'
+    resultPath.value = ''
+    resultDialog.value = true
+  } finally {
+    generating.value = false
+  }
+}
+
+async function openFolder(path: string) {
+  try {
+    await invoke('open_folder', { path })
+  } catch (e) {
+    console.error('打开文件夹失败:', e)
   }
 }
 
@@ -277,6 +357,11 @@ const handleReset = () => {
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.clear-chip {
+  cursor: pointer;
+  font-weight: 500;
 }
 
 /* ---- sections ---- */
@@ -360,5 +445,14 @@ const handleReset = () => {
   min-height: 0;
   overflow: auto;
   overscroll-behavior: contain;
+}
+
+.path-mono {
+  font-family: 'SF Mono', 'Cascadia Code', monospace;
+  font-size: 11px;
+  background: #f1f5f9;
+  padding: 2px 6px;
+  border-radius: 4px;
+  word-break: break-all;
 }
 </style>

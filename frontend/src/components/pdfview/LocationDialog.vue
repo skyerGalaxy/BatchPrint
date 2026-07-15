@@ -465,6 +465,7 @@ function handleCancel() {
           <v-icon start size="14">mdi-plus</v-icon>条件
         </v-chip>
         <v-spacer></v-spacer>
+        <v-btn variant="text" rounded="lg" @click="handleCancel">取消</v-btn>
         <v-btn variant="flat" rounded="lg" color="#4f8cff" @click="goNext">下一步</v-btn>
       </v-card-actions>
 

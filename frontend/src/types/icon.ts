@@ -16,13 +16,15 @@ export interface ConditionGroup {
 }
 
 export interface IconOption {
-  type: 'field' | 'image'
+  type: 'field' | 'image' | 'icon'
   fieldName?: string
   fontFamily?: string
   fontWeight?: number
   opacity?: number
   color?: string
   src?: string
+  icon?: string
+  size?: number
 }
 
 export interface StoreIcon {
@@ -38,4 +40,5 @@ export interface StoreIcon {
   groupConnectors?: MatchMode[]
   size?: number
   scale?: number
+  rotation?: number
 }

@@ -15,7 +15,8 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            move_folder_with_extra
+            move_folder_with_extra,
+            open_folder
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -113,3 +114,29 @@ async fn move_folder_with_extra(src: String, dest: String) -> Result<String, Str
 }
 
 // 别忘了在 generate_handler 中注册这个命令
+
+#[tauri::command]
+fn open_folder(path: String) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| format!("打开文件夹失败: {}", e))?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| format!("打开文件夹失败: {}", e))?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| format!("打开文件夹失败: {}", e))?;
+    }
+    Ok(())
+}

@@ -529,40 +529,36 @@ function drawIcon(ctx: CanvasRenderingContext2D, icon: StoreIcon, isSelected: bo
   const size = getIconSize(icon);
   const rotation = icon.rotation ?? 0;
 
-  const shouldDraw = icon.mode === 'single' || checkIconConditions(icon);
+  ctx.save();
+  ctx.translate(x, y);
+  if (rotation !== 0) ctx.rotate(rotation * Math.PI / 180);
 
-  if (shouldDraw) {
-    ctx.save();
-    ctx.translate(x, y);
-    if (rotation !== 0) ctx.rotate(rotation * Math.PI / 180);
-
-    if (icon.option.type === 'field') {
-      const fontFamily = icon.option.fontFamily || '微软雅黑';
-      const fontSize = Math.max(8, Math.floor(size * 0.3));
-      drawFieldText(ctx,
-        icon.option.fieldName || '',
-        fontFamily,
-        fontSize,
-        icon.option.fontWeight ?? 400,
-        icon.option.opacity ?? 1,
-        icon.option.color ?? '#000000',
-        0, 0
-      );
-    } else if (icon.option.type === 'image') {
-      drawImageIcon(ctx, icon.option.src || '', 0, 0, size, icon.pageIndex);
-    } else if (icon.option.type === 'icon') {
-      const iconFontSize = Math.max(12, Math.floor(size * 0.8));
-      ctx.globalAlpha = icon.option.opacity ?? 1;
-      ctx.fillStyle = icon.option.color ?? '#000000';
-      ctx.font = `${iconFontSize}px "Segoe UI Symbol"`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(icon.option.icon || '', 0, 0);
-      ctx.globalAlpha = 1;
-    }
-
-    ctx.restore();
+  if (icon.option.type === 'field') {
+    const fontFamily = icon.option.fontFamily || '微软雅黑';
+    const fontSize = Math.max(8, Math.floor(size * 0.3));
+    drawFieldText(ctx,
+      icon.option.fieldName || '',
+      fontFamily,
+      fontSize,
+      icon.option.fontWeight ?? 400,
+      icon.option.opacity ?? 1,
+      icon.option.color ?? '#000000',
+      0, 0
+    );
+  } else if (icon.option.type === 'image') {
+    drawImageIcon(ctx, icon.option.src || '', 0, 0, size, icon.pageIndex);
+  } else if (icon.option.type === 'icon') {
+    const iconFontSize = Math.max(12, Math.floor(size * 0.8));
+    ctx.globalAlpha = icon.option.opacity ?? 1;
+    ctx.fillStyle = icon.option.color ?? '#000000';
+    ctx.font = `${iconFontSize}px "Segoe UI Symbol"`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(icon.option.icon || '', 0, 0);
+    ctx.globalAlpha = 1;
   }
+
+  ctx.restore();
 
   if (isSelected) {
     const bounds = getIconBounds(icon);
@@ -591,7 +587,7 @@ function drawIcon(ctx: CanvasRenderingContext2D, icon: StoreIcon, isSelected: bo
 // 初始化
 onMounted(async () => {
   // 先加载自定义字体
-  await loadCustomFonts();
+  await loadCustomFonts(bpStore.dataPath);
   bpStore.pdfScale = pdfScale.value;
   
   // 然后加载 PDF

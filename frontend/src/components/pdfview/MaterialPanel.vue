@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue';
 import { useBPStore } from '@/stores/bpstore';
-import { getFontsList, getFontValueByName } from '@/utils/fontLoader';
+import { getFontsList, getFontValueByName, loadCustomFonts } from '@/utils/fontLoader';
 import { open } from '@tauri-apps/plugin-dialog';
 import { readFile, writeFile, exists, mkdir, readDir, remove } from '@tauri-apps/plugin-fs';
 import { convertFileSrc } from '@tauri-apps/api/core';
@@ -35,8 +35,6 @@ const size = ref(120);
 const fontFamily = ref('微软雅黑');
 const fontOptions = ref<Font[]>([]);
 const fontDisplayNames = ref<string[]>([]);
-
-const fontWeight = ref(400);
 
 const opacity = ref(1);
 const color = ref('#000000');
@@ -160,8 +158,23 @@ const iconGroups = [
 ];
 
 onMounted(async () => {
+  await loadFonts();
+  if (bpStore.dataPath) {
+    await refreshImageLists();
+  }
+});
+
+watch(() => bpStore.dataPath, async (newPath) => {
+  if (newPath) {
+    await loadFonts();
+    await refreshImageLists();
+  }
+});
+
+async function loadFonts() {
   try {
-    fontOptions.value = await getFontsList();
+    await loadCustomFonts(bpStore.dataPath);
+    fontOptions.value = await getFontsList(bpStore.dataPath);
     fontDisplayNames.value = fontOptions.value.map(f => f.name);
     if (fontOptions.value.length > 0) {
       fontFamily.value = fontOptions.value[0].value;
@@ -178,15 +191,7 @@ onMounted(async () => {
     fontDisplayNames.value = fontOptions.value.map(f => f.name);
     fontFamily.value = fontOptions.value[0].value;
   }
-
-  if (bpStore.dataPath) {
-    await refreshImageLists();
-  }
-});
-
-watch(() => bpStore.dataPath, async (newPath) => {
-  if (newPath) await refreshImageLists();
-});
+}
 
 
 function selectImage(type: 'signature' | 'seal', index: number) {
@@ -223,18 +228,18 @@ function onCustomSizeInput() {
 }
 
 async function selectField(fieldName: string | null = null) {
+  const actualFieldName = fieldName ?? selectedField.value;
+  if (!actualFieldName) return;
+
   let fontValue = fontFamily.value;
   if (fontDisplayNames.value.includes(fontFamily.value)) {
-    fontValue = await getFontValueByName(fontFamily.value);
+    fontValue = await getFontValueByName(fontFamily.value, bpStore.dataPath);
   }
 
   emits('select_option', {
     type: 'field',
-    fieldName: fieldName ?? selectedField.value ?? '',
+    fieldName: actualFieldName,
     fontFamily: fontValue,
-    fontWeight: fontWeight.value,
-    opacity: opacity.value,
-    color: color.value,
     size: size.value
   });
 }
@@ -396,65 +401,6 @@ async function deleteImage(type: 'signature' | 'seal', index: number) {
                 @update:model-value="() => selectField()"
               />
             </div>
-            <div class="mp-ctrl-row">
-              <v-icon size="16" color="#94a3b8">mdi-format-size</v-icon>
-              <v-text-field
-                v-model.number="size"
-                type="number"
-                density="compact"
-                variant="outlined"
-                hide-details
-                :min="16"
-                :max="200"
-                class="bento-select"
-                @update:model-value="() => selectField()"
-              />
-            </div>
-            <div class="mp-ctrl-row">
-              <v-icon size="16" color="#94a3b8">mdi-format-bold</v-icon>
-              <v-slider
-                v-model="fontWeight"
-                density="compact"
-                hide-details
-                :min="300"
-                :max="700"
-                :step="2"
-                thumb-size="16"
-                track-size="3"
-                class="bento-slider"
-                @update:model-value="() => selectField()"
-              />
-            </div>
-            <div class="mp-ctrl-row">
-              <v-icon size="16" color="#94a3b8">mdi-opacity</v-icon>
-              <v-slider
-                v-model="opacity"
-                density="compact"
-                hide-details
-                :min="0.1"
-                :max="1"
-                :step="0.05"
-                thumb-size="16"
-                track-size="3"
-                class="bento-slider"
-                @update:model-value="() => selectField()"
-              />
-            </div>
-            <div class="mp-ctrl-row">
-              <v-icon size="16" color="#94a3b8">mdi-palette</v-icon>
-              <v-menu v-model="colorMenu" :close-on-content-click="false" offset="8">
-                <template #activator="{ props: menuProps }">
-                  <div class="color-swatch" :style="{ background: color }" v-bind="menuProps"></div>
-                </template>
-                <v-color-picker
-                  v-model="color"
-                  mode="hex"
-                  hide-inputs
-                  @update:model-value="selectField(); colorMenu = false"
-                />
-              </v-menu>
-              <span class="color-hex">{{ color }}</span>
-            </div>
           </div>
           <div class="mp-preview-box">
             <span class="mp-preview-label">预览</span>
@@ -462,10 +408,7 @@ async function deleteImage(type: 'signature' | 'seal', index: number) {
               class="mp-preview-text"
               :style="{
                 fontFamily: fontFamily,
-                fontWeight: fontWeight,
-                fontSize: Math.min(size, 28) + 'px',
-                opacity: opacity,
-                color: color
+                fontSize: Math.min(size, 28) + 'px'
               }"
             >预览文字</span>
           </div>
@@ -601,20 +544,6 @@ async function deleteImage(type: 'signature' | 'seal', index: number) {
         </div>
 
         <div class="mp-icon-controls">
-          <div class="mp-ctrl-row">
-            <v-icon size="16" color="#94a3b8">mdi-format-size</v-icon>
-            <v-text-field
-              v-model.number="size"
-              type="number"
-              density="compact"
-              variant="outlined"
-              hide-details
-              :min="16"
-              :max="200"
-              class="bento-select"
-              @update:model-value="() => selectIcon(iconChar)"
-            />
-          </div>
           <div class="mp-ctrl-row">
             <v-icon size="16" color="#94a3b8">mdi-opacity</v-icon>
             <v-slider

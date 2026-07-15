@@ -1,11 +1,11 @@
 <script setup lang="ts">
-    import {ref, onMounted} from 'vue'
+    import {ref, computed, onMounted} from 'vue'
     import { open } from '@tauri-apps/plugin-dialog'
     import { Store } from '@tauri-apps/plugin-store'
     import { invoke } from '@tauri-apps/api/core'
 
     import { useBPStore } from '@/stores/bpstore'
-    import { mkdir } from '@tauri-apps/plugin-fs'
+    import { mkdir, readDir, copyFile, remove, exists } from '@tauri-apps/plugin-fs'
 
     const dialog = ref(false)
     const selectedItemIndex = ref(0)
@@ -14,6 +14,7 @@
     const settingsItems = [
         { title: '通用设置', icon: 'mdi-cog' },
         { title: '存储与路径', icon: 'mdi-folder-settings' },
+        { title: '字体管理', icon: 'mdi-format-font' },
         { title: '帐户与安全', icon: 'mdi-account-circle' },
         { title: '关于', icon: 'mdi-information' },
     ];
@@ -24,6 +25,53 @@
     const isMovingDialog = ref(false)
 
     const bpStore = useBPStore();
+
+    const fontFiles = ref<string[]>([])
+    const fontPath = computed(() => bpStore.dataPath ? `${bpStore.dataPath}/fonts` : '')
+
+    async function loadFontList() {
+      if (!fontPath.value) return
+      try {
+        const dirExists = await exists(fontPath.value)
+        if (!dirExists) { fontFiles.value = []; return }
+        const entries = await readDir(fontPath.value)
+        fontFiles.value = entries
+          .filter(e => e.name?.toLowerCase().endsWith('.ttf'))
+          .map(e => e.name)
+      } catch (error) {
+        console.error('加载字体列表失败:', error)
+      }
+    }
+
+    async function uploadFont() {
+      try {
+        const result = await open({
+          multiple: false,
+          filters: [{ name: '字体文件', extensions: ['ttf'] }],
+          title: '选择字体文件'
+        })
+        if (result && typeof result === 'string') {
+          const fileName = result.split(/[/\\]/).pop() || 'font.ttf'
+          const dest = `${fontPath.value}/${fileName}`
+          if (!(await exists(fontPath.value))) {
+            await mkdir(fontPath.value, { recursive: true })
+          }
+          await copyFile(result, dest)
+          await loadFontList()
+        }
+      } catch (error) {
+        console.error('上传字体失败:', error)
+      }
+    }
+
+    async function deleteFont(filename: string) {
+      try {
+        await remove(`${fontPath.value}/${filename}`)
+        await loadFontList()
+      } catch (error) {
+        console.error('删除字体失败:', error)
+      }
+    }
 
     async function openPathDialog() {
         try {
@@ -57,6 +105,7 @@
         console.log('打开设置对话框');
         dialog.value = true;
         selectedItemIndex.value = 0;
+        loadFontList();
     }
 
     // 公共函数：更新路径到所有存储位置
@@ -76,6 +125,7 @@
                 mkdir(`${path}/sealImg`, { recursive: true }),
                 mkdir(`${path}/signImg`, { recursive: true }),
                 mkdir(`${path}/generatePdf`, { recursive: true }),
+                mkdir(`${path}/fonts`, { recursive: true }),
             ]);
             await updateDataPath(path);
             isMovingDialog.value = false;
@@ -173,10 +223,53 @@
                         </v-window-item>
 
                         <v-window-item :value="2">
-                            <div>帐户与安全</div>
+                            <h2 class="text-h6 mb-4">字体管理</h2>
+                            <p class="text-subtitle-1 mb-2">自定义字体列表:</p>
+
+                            <v-btn
+                                color="primary"
+                                prepend-icon="mdi-upload"
+                                @click="uploadFont"
+                                class="mb-3"
+                            >
+                                上传字体
+                            </v-btn>
+
+                            <v-alert v-if="fontFiles.length === 0" type="info" class="mt-2" density="compact">
+                                暂无可字体，点击"上传字体"添加 TTF 字体文件
+                            </v-alert>
+
+                            <v-list v-else density="compact" class="bg-grey-lighten-4 rounded" lines="one">
+                                <v-list-item
+                                    v-for="font in fontFiles"
+                                    :key="font"
+                                    :title="font"
+                                    :subtitle="'TTF 字体文件'"
+                                >
+                                    <template #prepend>
+                                        <v-icon>mdi-format-font</v-icon>
+                                    </template>
+                                    <template #append>
+                                        <v-btn
+                                            icon
+                                            variant="text"
+                                            density="compact"
+                                            color="error"
+                                            @click="deleteFont(font)"
+                                        >
+                                            <v-icon>mdi-delete</v-icon>
+                                            <v-tooltip activator="parent" location="top">删除</v-tooltip>
+                                        </v-btn>
+                                    </template>
+                                </v-list-item>
+                            </v-list>
                         </v-window-item>
 
                         <v-window-item :value="3">
+                            <div>帐户与安全</div>
+                        </v-window-item>
+
+                        <v-window-item :value="4">
                             <div>关于</div>
                         </v-window-item>
                     </v-window>

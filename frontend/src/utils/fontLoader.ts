@@ -22,20 +22,23 @@ const loadedFonts = new Set<string>(); // 已加载的字体
 /**
  * 从后端获取字体列表和信息
  */
-export async function fetchFontsList(): Promise<Font[]> {
+export async function fetchFontsList(fontsPath?: string): Promise<Font[]> {
   if (fontsCache) {
     return fontsCache;
   }
 
   try {
-    const response = await fetch('http://localhost:8000/api/fonts');
+    let url = 'http://localhost:8000/api/fonts';
+    if (fontsPath) {
+      url += `?fonts_path=${encodeURIComponent(fontsPath + '/fonts')}`;
+    }
+    const response = await fetch(url);
     const data: FontsData = await response.json();
     fontsCache = data.fonts || [];
     console.log('字体列表已加载:', fontsCache);
     return fontsCache;
   } catch (error) {
     console.error('获取字体列表失败:', error);
-    // 返回默认字体
     return [
       { name: '微软雅黑', value: '微软雅黑', type: 'system' },
       { name: '宋体', value: '宋体', type: 'system' },
@@ -47,9 +50,9 @@ export async function fetchFontsList(): Promise<Font[]> {
 /**
  * 加载所有自定义字体到 Canvas
  */
-export async function loadCustomFonts(): Promise<void> {
+export async function loadCustomFonts(fontsPath?: string): Promise<void> {
   try {
-    const fonts = await fetchFontsList();
+    const fonts = await fetchFontsList(fontsPath);
 
     // 过滤出需要加载的自定义字体
     const customFonts = fonts.filter(f => f.type === 'custom' && f.url);
@@ -86,9 +89,9 @@ export async function loadCustomFonts(): Promise<void> {
 /**
  * 获取字体显示名称列表(用于 MaterialPanel)
  */
-export async function getFontDisplayNames(): Promise<string[]> {
+export async function getFontDisplayNames(fontsPath?: string): Promise<string[]> {
   try {
-    const fonts = await fetchFontsList();
+    const fonts = await fetchFontsList(fontsPath);
     return fonts.map(f => f.name);
   } catch (error) {
     console.error('获取字体显示名称失败:', error);
@@ -99,16 +102,16 @@ export async function getFontDisplayNames(): Promise<string[]> {
 /**
  * 获取完整的字体列表(用于需要name和value的场景)
  */
-export async function getFontsList(): Promise<Font[]> {
-  return await fetchFontsList();
+export async function getFontsList(fontsPath?: string): Promise<Font[]> {
+  return await fetchFontsList(fontsPath);
 }
 
 /**
  * 通过显示名称获取字体值
  */
-export async function getFontValueByName(displayName: string): Promise<string> {
+export async function getFontValueByName(displayName: string, fontsPath?: string): Promise<string> {
   try {
-    const fonts = await fetchFontsList();
+    const fonts = await fetchFontsList(fontsPath);
     const font = fonts.find(f => f.name === displayName);
     return font?.value || displayName;
   } catch (error) {
