@@ -36,6 +36,8 @@ export const useBPStore = defineStore("bpstore", () => {
   const excelContent = ref<any[][]>([]); 
 
   const iconList = ref<StoreIcon[]>([]);
+  const backendReady = ref(false);
+  const backendLog = ref('');
 
   const pdfSrc = ref<string>("");
   const excelSrc = ref<string>(""); 
@@ -107,6 +109,8 @@ export const useBPStore = defineStore("bpstore", () => {
     imageList_signature,
     imageList_seal,
     iconList,
+    backendReady,
+    backendLog,
     excelContent,
     pdfSrc,
     excelSrc,

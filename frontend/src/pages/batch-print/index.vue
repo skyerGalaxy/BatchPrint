@@ -189,6 +189,20 @@ const resultSuccess = ref(false)
 const resultMessage = ref('')
 const resultPath = ref('')
 
+async function apiPost(url: string, formData: FormData, retries = 30): Promise<any> {
+  for (let i = 0; i < retries; i++) {
+    try {
+      return await axios.post(url, formData)
+    } catch {
+      if (i < retries - 1) {
+        await new Promise(r => setTimeout(r, 1000))
+      } else {
+        throw new Error(`无法连接后端服务: ${url}`)
+      }
+    }
+  }
+}
+
 onMounted(() => {
   if (bpStore.pdfSrc) {
     pdfSrc.value = bpStore.pdfSrc
@@ -222,7 +236,7 @@ const handleExcelChange = async (event: Event) => {
     const formData = new FormData()
     formData.append('file', file)
 
-    const res = await axios.post('http://localhost:8000/get_excel_headers', formData)
+    const res = await apiPost('http://localhost:8000/get_excel_headers', formData)
     if (res.data.has_merged_cells) {
       mergedCellsDialog.value = true
       bpStore.fieldNames = []
@@ -264,7 +278,7 @@ const generateBatchPDF = async () => {
     formData.append('icon_list', JSON.stringify(bpStore.iconList))
     formData.append('pdf_scale', bpStore.pdfScale.toString())
 
-    const res = await axios.post('http://localhost:8000/generate_batch_pdf', formData)
+    const res = await apiPost('http://localhost:8000/generate_batch_pdf', formData)
 
     resultSuccess.value = true
     resultMessage.value = res.data.msg || 'PDF批量生成成功！'

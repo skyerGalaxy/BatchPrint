@@ -14,6 +14,7 @@ import App from './App.vue'
 import { createApp } from 'vue'
 import {createPinia} from "pinia";
 import { useBPStore } from './stores/bpstore';
+import { invoke } from '@tauri-apps/api/core';
 
 
 // Styles
@@ -32,3 +33,21 @@ await bpStore.initializeApp();
 app.mount('#app')
 
 document.addEventListener('contextmenu', e => e.preventDefault())
+
+async function pollBackend() {
+  for (let i = 0; i < 60; i++) {
+    try {
+      const status = await invoke('get_backend_status') as string;
+      if (status.startsWith('ready')) {
+        bpStore.backendReady = true;
+        bpStore.backendLog = status;
+        console.log('backend ready');
+        return;
+      }
+      bpStore.backendLog = status;
+    } catch { /* command not available in dev mode */ return; }
+    await new Promise(r => setTimeout(r, 1000));
+  }
+}
+
+pollBackend();

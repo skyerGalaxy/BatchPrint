@@ -19,6 +19,10 @@ from reportlab.pdfbase.ttfonts import TTFont
 
 app = FastAPI()
 
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
+
 # 允许前端跨域访问
 app.add_middleware(
     CORSMiddleware,
@@ -445,5 +449,8 @@ async def generate_batch_pdf(
         generated_files.append(str(output_path))
     
     return {"msg": "PDF 已保存", "path": str(target_dir), "files": generated_files}
-    
 
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
