@@ -6,6 +6,7 @@
 
     import { useBPStore } from '@/stores/bpstore'
     import { mkdir, readDir, copyFile, remove, exists } from '@tauri-apps/plugin-fs'
+    import { clearFontsCache, loadCustomFonts } from '@/utils/fontLoader'
 
     const dialog = ref(false)
     const selectedItemIndex = ref(0)
@@ -43,6 +44,12 @@
       }
     }
 
+    async function notifyFontsChanged() {
+      clearFontsCache()
+      await loadCustomFonts(bpStore.dataPath)
+      bpStore.fontsVersion++
+    }
+
     async function uploadFont() {
       try {
         const result = await open({
@@ -58,6 +65,7 @@
           }
           await copyFile(result, dest)
           await loadFontList()
+          await notifyFontsChanged()
         }
       } catch (error) {
         console.error('上传字体失败:', error)
@@ -68,6 +76,7 @@
       try {
         await remove(`${fontPath.value}/${filename}`)
         await loadFontList()
+        await notifyFontsChanged()
       } catch (error) {
         console.error('删除字体失败:', error)
       }

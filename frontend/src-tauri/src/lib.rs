@@ -8,6 +8,7 @@ use std::sync::Mutex;
 use std::env;
 use std::time::Duration;
 use std::thread;
+use tauri::Manager;
 
 static BACKEND_PROCESS: Mutex<Option<Child>> = Mutex::new(None);
 static BACKEND_READY: Mutex<bool> = Mutex::new(false);
@@ -31,11 +32,51 @@ fn append_log(msg: &str) {
     }
 }
 
-fn spawn_backend() {
-    let current_exe = env::current_exe().unwrap_or_default();
-    let exe_dir = current_exe.parent().unwrap_or(std::path::Path::new("."));
+fn port_8000_in_use() -> bool {
+    TcpStream::connect_timeout(
+        &"127.0.0.1:8000".parse().unwrap(),
+        Duration::from_millis(300),
+    )
+    .is_ok()
+}
 
-    let backend_name = if cfg!(target_os = "windows") {
+fn kill_stale_backend(dest_name: &str, dest_path: &PathBuf) {
+    if !port_8000_in_use() {
+        return;
+    }
+    append_log("port 8000 already in use, killing stale backend processes...");
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        let _ = Command::new("taskkill")
+            .args(["/F", "/T", "/IM", dest_name])
+            .creation_flags(CREATE_NO_WINDOW)
+            .status();
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = dest_name;
+        let _ = Command::new("pkill")
+            .args(["-f", &dest_path.to_string_lossy().to_string()])
+            .status();
+    }
+
+    for _ in 0..10 {
+        if !port_8000_in_use() {
+            append_log("stale backend killed, port 8000 released");
+            return;
+        }
+        thread::sleep(Duration::from_millis(300));
+    }
+    append_log("WARNING: port 8000 still in use (occupied by another program?)");
+    #[cfg(target_os = "windows")]
+    let _ = dest_path;
+}
+
+fn prepare_and_spawn_backend(app_data_dir: PathBuf, resource_dir: PathBuf) {
+    let src_name = if cfg!(target_os = "windows") {
         "backend-x86_64-pc-windows-msvc.exe"
     } else if cfg!(target_os = "macos") {
         "backend-x86_64-apple-darwin"
@@ -43,27 +84,72 @@ fn spawn_backend() {
         "backend-x86_64-unknown-linux-gnu"
     };
 
-    let backend_path = exe_dir.join(backend_name);
-    append_log(&format!("exe_dir: {:?}", exe_dir));
-    append_log(&format!("backend_path: {:?}", backend_path));
+    let dest_name = if cfg!(target_os = "windows") {
+        "backend.exe"
+    } else {
+        "backend"
+    };
 
-    if !backend_path.exists() {
-        append_log("ERROR: backend binary not found");
+    let src_path = resource_dir.join("binaries").join(src_name);
+    let dest_path = app_data_dir.join(dest_name);
+
+    append_log(&format!("resource_dir: {:?}", resource_dir));
+    append_log(&format!("app_data_dir: {:?}", app_data_dir));
+    append_log(&format!("src_path: {:?}", src_path));
+    append_log(&format!("dest_path: {:?}", dest_path));
+
+    // 残留的旧后端会占用 8000 端口并锁定 dest 文件，先清理
+    kill_stale_backend(dest_name, &dest_path);
+
+    if src_path.exists() {
+        let need_copy = match dest_path.metadata() {
+            Ok(dest_meta) => {
+                match src_path.metadata() {
+                    Ok(src_meta) => {
+                        src_meta.modified().ok() != dest_meta.modified().ok()
+                    }
+                    Err(_) => false,
+                }
+            }
+            Err(_) => true,
+        };
+
+        if need_copy {
+            append_log("copying backend from resources to app data...");
+            match fs::copy(&src_path, &dest_path) {
+                Ok(_) => append_log("copy succeeded"),
+                Err(e) => append_log(&format!("copy failed: {}", e)),
+            }
+        } else {
+            append_log("backend already up to date in app data");
+        }
+    } else {
+        append_log("WARNING: backend not found in resources");
+    }
+
+    if !dest_path.exists() {
+        append_log("ERROR: backend binary not available");
         return;
     }
-    append_log("backend binary found, spawning...");
 
-    let mut cmd = Command::new(&backend_path);
+    #[cfg(not(target_os = "windows"))]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&dest_path, fs::Permissions::from_mode(0o755));
+    }
+
+    append_log("spawning backend...");
+    let mut cmd = Command::new(&dest_path);
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
-        const CREATE_NEW_CONSOLE: u32 = 0x00000010;
-        cmd.creation_flags(CREATE_NEW_CONSOLE);
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
     }
 
     match cmd.spawn() {
         Ok(child) => {
-            append_log("backend process spawned successfully");
+            append_log("backend process spawned");
             let mut proc = BACKEND_PROCESS.lock().unwrap();
             *proc = Some(child);
 
@@ -107,10 +193,20 @@ fn check_backend_health() -> bool {
 
 fn stop_backend() {
     if let Ok(mut proc) = BACKEND_PROCESS.lock() {
-        if let Some(ref mut child) = *proc {
+        if let Some(mut child) = proc.take() {
+            // PyInstaller onefile 的 exe 会派生子进程，必须杀掉整个进程树
+            #[cfg(target_os = "windows")]
+            {
+                use std::os::windows::process::CommandExt;
+                const CREATE_NO_WINDOW: u32 = 0x08000000;
+                let _ = Command::new("taskkill")
+                    .args(["/F", "/T", "/PID", &child.id().to_string()])
+                    .creation_flags(CREATE_NO_WINDOW)
+                    .status();
+            }
             let _ = child.kill();
+            let _ = child.wait();
         }
-        *proc = None;
     }
 }
 
@@ -128,7 +224,11 @@ pub fn run() {
                         .build(),
                 )?;
             }
-            thread::spawn(spawn_backend);
+            let app_data_dir = app.handle().path().app_data_dir()
+                .unwrap_or_else(|_| PathBuf::from("."));
+            let resource_dir = app.handle().path().resource_dir()
+                .unwrap_or_else(|_| PathBuf::from("."));
+            thread::spawn(move || prepare_and_spawn_backend(app_data_dir, resource_dir));
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -143,8 +243,13 @@ pub fn run() {
             open_folder,
             get_backend_status
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|_app_handle, event| {
+            if let tauri::RunEvent::Exit = event {
+                stop_backend();
+            }
+        });
 }
 
 #[tauri::command]

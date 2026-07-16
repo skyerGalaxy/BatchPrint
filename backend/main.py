@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 import pandas as pd
 import json
+import math
 from pathlib import Path
 from urllib.parse import quote, unquote, urlparse
 import io
@@ -165,6 +166,7 @@ async def generate_batch_pdf(
     path: str = Form(...),
     icon_list: str = Form(default="[]"),
     pdf_scale: float = Form(default=2.0),
+    filename_config: str = Form(default="{}"),
 ):
     
     register_custom_fonts()
@@ -183,6 +185,36 @@ async def generate_batch_pdf(
         icon_list_data = json.loads(icon_list)
     except json.JSONDecodeError:
         icon_list_data = []
+
+    try:
+        filename_cfg = json.loads(filename_config)
+    except json.JSONDecodeError:
+        filename_cfg = {}
+    name_parts = filename_cfg.get("parts") or []
+    name_separator = filename_cfg.get("separator", "_")
+
+    def sanitize_filename(name: str) -> str:
+        for ch in '\\/:*?"<>|':
+            name = name.replace(ch, "_")
+        return name.strip().strip(".")
+
+    def build_filename(row_data: dict, row_idx: int) -> str:
+        segments = []
+        for part in name_parts:
+            part_type = part.get("type")
+            if part_type == "field":
+                value = row_data.get(part.get("field"))
+                segment = "" if value is None else str(value)
+            elif part_type == "seq":
+                num = int(part.get("start") or 1) + row_idx
+                digits = int(part.get("digits") or 0)
+                segment = str(num).zfill(digits) if digits else str(num)
+            else:
+                segment = str(part.get("text") or "")
+            if segment:
+                segments.append(segment)
+        name = sanitize_filename(name_separator.join(segments))
+        return name or str(row_idx + 1)
     
     target_dir = Path(path) / "generatePdf"
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -259,14 +291,15 @@ async def generate_batch_pdf(
             except:
                 return False
 
+        applied_font = None
         if font_weight >= 600:
-            bold_name = font_family + "-Bold"
-            if not _safe_set_font(bold_name, font_size):
-                if not _safe_set_font(font_family, font_size):
-                    _safe_set_font("微软雅黑", font_size)
+            candidates = [font_family + "-Bold", font_family, "微软雅黑"]
         else:
-            if not _safe_set_font(font_family, font_size):
-                _safe_set_font("微软雅黑", font_size)
+            candidates = [font_family, "微软雅黑"]
+        for name in candidates:
+            if _safe_set_font(name, font_size):
+                applied_font = name
+                break
 
         if item_opacity < 1.0:
             try:
@@ -279,36 +312,78 @@ async def generate_batch_pdf(
         g = int(hex_str[2:4], 16) / 255.0
         b = int(hex_str[4:6], 16) / 255.0
         c.setFillColorRGB(r, g, b)
+        return applied_font
 
-    def render_icon_to_overlay(overlay_pdf, icon_item, row_data: dict, overlay_height: float):
+    def _draw_centred_text(c, x, y, text, font_name, font_size):
+        # 前端 canvas 使用 textBaseline='middle'（文字垂直居中于 y），
+        # ReportLab drawCentredString 的 y 是基线，需向下偏移到基线位置
+        offset = font_size * 0.30
+        if font_name:
+            try:
+                ascent, descent = pdfmetrics.getAscentDescent(font_name, font_size)
+                offset = (ascent + descent) / 2.0
+            except:
+                pass
+        c.drawCentredString(x, y - offset, text)
+
+    def render_icon_to_overlay(overlay_pdf, icon_item, row_data: dict, page_rot: int, crop):
         from reportlab.lib.utils import ImageReader
-        
+
         mode = icon_item.get("mode")
+        if mode not in ("single", "conditional"):
+            return
+        if mode == "conditional" and not evaluate_icon_conditions(row_data, icon_item):
+            return
+
         pointer = icon_item.get("pointer", {})
         client_x = pointer.get("clientX", 0)
         client_y = pointer.get("clientY", 0)
-        size = icon_item.get("size", 150)
-        
-        x = client_x
-        y = overlay_height - client_y
-        
-        font_size = max(8, size * 0.3)
-        
-        if mode == "single":
-            option = icon_item.get("option", {})
-            item_type = option.get("type")
-            
+        size = icon_item.get("size")
+        if size is None:
+            size = 40  # 与前端 getIconSize 默认值保持一致
+        icon_rotation = icon_item.get("rotation") or 0
+
+        crop_left, crop_bottom, crop_right, crop_top = crop
+
+        # pdf.js getViewport 基于 CropBox 且随 /Rotate 旋转，
+        # 将前端视口坐标(左上原点)转换回未旋转的 PDF 坐标(左下原点)
+        if page_rot == 90:
+            x = crop_left + client_y
+            y = crop_bottom + client_x
+        elif page_rot == 180:
+            x = crop_right - client_x
+            y = crop_bottom + client_y
+        elif page_rot == 270:
+            x = crop_right - client_y
+            y = crop_top - client_x
+        else:
+            x = crop_left + client_x
+            y = crop_top - client_y
+
+        option = icon_item.get("option", {})
+        item_type = option.get("type")
+
+        overlay_pdf.saveState()
+        overlay_pdf.translate(x, y)
+        # 前端 rotation 为屏幕顺时针角度；页面显示时会再顺时针旋转 page_rot，
+        # 因此叠加层需预旋转 (page_rot - rotation) 度（ReportLab 逆时针为正）
+        angle = (page_rot - icon_rotation) % 360
+        if angle:
+            overlay_pdf.rotate(angle)
+
+        try:
             if item_type == "field":
                 field_name = option.get("fieldName")
                 font_family = option.get("fontFamily", "微软雅黑")
                 font_weight = option.get("fontWeight", 400)
                 item_color = option.get("color", "#000000")
                 item_opacity = option.get("opacity", 1.0)
+                font_size = max(8, math.floor(size * 0.3))
                 if field_name and field_name in row_data:
                     field_value = str(row_data[field_name])
-                    _apply_font_style(overlay_pdf, font_family, font_weight, font_size, item_color, item_opacity)
-                    overlay_pdf.drawCentredString(x, y, field_value)
-            
+                    applied_font = _apply_font_style(overlay_pdf, font_family, font_weight, font_size, item_color, item_opacity)
+                    _draw_centred_text(overlay_pdf, 0, 0, field_value, applied_font, font_size)
+
             elif item_type == "image":
                 src = option.get("src")
                 if src:
@@ -317,7 +392,7 @@ async def generate_batch_pdf(
                         local_path = resolve_local_path_from_url(src)
                     else:
                         local_path = src
-                    
+
                     if Path(local_path).exists():
                         try:
                             img = Image.open(local_path)
@@ -329,83 +404,30 @@ async def generate_batch_pdf(
                             else:
                                 render_width = size * img_ratio
                                 render_height = size
-                            
+
                             overlay_pdf.drawImage(
                                 ImageReader(local_path),
-                                x - render_width / 2, y - render_height / 2,
+                                -render_width / 2, -render_height / 2,
                                 width=render_width,
                                 height=render_height,
                                 mask='auto'
                             )
                         except Exception as e:
                             print(f"图片渲染失败: {local_path}, {e}")
-            
+
             elif item_type == "icon":
                 icon_char = option.get("icon")
                 if icon_char:
                     icon_color = option.get("color", "#000000")
                     icon_opacity = option.get("opacity", 1.0)
-                    icon_size = max(12, size * 0.8)
-                    _apply_font_style(overlay_pdf, "Segoe UI Symbol", 400, icon_size, icon_color, icon_opacity)
-                    overlay_pdf.drawCentredString(x, y, icon_char)
-        
-        elif mode == "conditional":
-            if evaluate_icon_conditions(row_data, icon_item):
-                option = icon_item.get("option", {})
-                item_type = option.get("type")
-                
-                if item_type == "field":
-                    field_name = option.get("fieldName")
-                    font_family = option.get("fontFamily", "微软雅黑")
-                    font_weight = option.get("fontWeight", 400)
-                    item_color = option.get("color", "#000000")
-                    item_opacity = option.get("opacity", 1.0)
-                    if field_name and field_name in row_data:
-                        field_value = str(row_data[field_name])
-                        _apply_font_style(overlay_pdf, font_family, font_weight, font_size, item_color, item_opacity)
-                        overlay_pdf.drawCentredString(x, y, field_value)
-                
-                elif item_type == "image":
-                    src = option.get("src")
-                    if src:
-                        src = src.strip()
-                        if src.startswith("http://asset.localhost/"):
-                            local_path = resolve_local_path_from_url(src)
-                        else:
-                            local_path = src
-                        
-                        if Path(local_path).exists():
-                            try:
-                                img = Image.open(local_path)
-                                img_width, img_height = img.size
-                                img_ratio = img_width / img_height
-                                if img_ratio > 1:
-                                    render_width = size
-                                    render_height = size / img_ratio
-                                else:
-                                    render_width = size * img_ratio
-                                    render_height = size
-                                
-                                overlay_pdf.drawImage(
-                                    ImageReader(local_path),
-                                    x - render_width / 2, y - render_height / 2,
-                                    width=render_width,
-                                    height=render_height,
-                                    mask='auto'
-                                )
-                            except Exception as e:
-                                print(f"图片渲染失败: {local_path}, {e}")
-                
-                elif item_type == "icon":
-                    icon_char = option.get("icon")
-                    if icon_char:
-                        icon_color = option.get("color", "#000000")
-                        icon_opacity = option.get("opacity", 1.0)
-                        icon_size = max(12, size * 0.8)
-                        _apply_font_style(overlay_pdf, "Segoe UI Symbol", 400, icon_size, icon_color, icon_opacity)
-                        overlay_pdf.drawCentredString(x, y, icon_char)
+                    icon_size = max(12, math.floor(size * 0.8))
+                    applied_font = _apply_font_style(overlay_pdf, "Segoe UI Symbol", 400, icon_size, icon_color, icon_opacity)
+                    _draw_centred_text(overlay_pdf, 0, 0, icon_char, applied_font, icon_size)
+        finally:
+            overlay_pdf.restoreState()
     
     generated_files = []
+    used_names = {}
     
     for row_idx, row in enumerate(content):
         row_data = {headers[i]: row[i] for i in range(len(headers))}
@@ -419,6 +441,16 @@ async def generate_batch_pdf(
             scaled_width = original_page.mediabox.width * pdf_scale
             scaled_height = original_page.mediabox.height * pdf_scale
             
+            rotation = int(original_page.get('/Rotate', 0)) % 360
+            # pdf.js getViewport 基于 CropBox，先记录缩放后的裁剪框坐标
+            cb = original_page.cropbox
+            crop_box_scaled = (
+                float(cb.left) * pdf_scale,
+                float(cb.bottom) * pdf_scale,
+                float(cb.right) * pdf_scale,
+                float(cb.top) * pdf_scale,
+            )
+            
             original_page.scale(pdf_scale, pdf_scale)
             
             icons_on_page = [icon for icon in icon_list_data if icon.get("pageIndex") == page_idx + 1]
@@ -428,7 +460,7 @@ async def generate_batch_pdf(
                 c = canvas.Canvas(overlay_buffer, pagesize=(scaled_width, scaled_height))
                 
                 for icon_item in icons_on_page:
-                    render_icon_to_overlay(c, icon_item, row_data, scaled_height)
+                    render_icon_to_overlay(c, icon_item, row_data, rotation, crop_box_scaled)
                 
                 c.save()
                 overlay_buffer.seek(0)
@@ -436,12 +468,22 @@ async def generate_batch_pdf(
                 overlay_reader = PdfReader(overlay_buffer)
                 overlay_page = overlay_reader.pages[0]
                 
+                from pypdf.generic import RectangleObject as Rect
+                saved_mb = original_page.mediabox
+                original_page.mediabox = Rect((0, 0, scaled_width, scaled_height))
                 original_page.merge_page(overlay_page)
+                original_page.mediabox = saved_mb
             
             original_page.scale(1/pdf_scale, 1/pdf_scale)
             row_writer.add_page(original_page)
         
-        output_filename = f"{row_idx + 1}.pdf"
+        base_name = build_filename(row_data, row_idx)
+        if base_name in used_names:
+            used_names[base_name] += 1
+            base_name = f"{base_name}({used_names[base_name]})"
+        else:
+            used_names[base_name] = 0
+        output_filename = f"{base_name}.pdf"
         output_path = target_dir / output_filename
         with open(output_path, "wb") as f:
             row_writer.write(f)

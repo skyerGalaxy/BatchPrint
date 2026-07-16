@@ -20,6 +20,13 @@ let fontsCache: Font[] | null = null;
 const loadedFonts = new Set<string>(); // 已加载的字体
 
 /**
+ * 清除字体列表缓存（上传/删除字体后调用，以便重新拉取）
+ */
+export function clearFontsCache(): void {
+  fontsCache = null;
+}
+
+/**
  * 从后端获取字体列表和信息
  */
 export async function fetchFontsList(fontsPath?: string): Promise<Font[]> {

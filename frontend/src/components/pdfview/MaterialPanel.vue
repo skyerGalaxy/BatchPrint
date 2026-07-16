@@ -171,12 +171,16 @@ watch(() => bpStore.dataPath, async (newPath) => {
   }
 });
 
+watch(() => bpStore.fontsVersion, async () => {
+  await loadFonts();
+});
+
 async function loadFonts() {
   try {
     await loadCustomFonts(bpStore.dataPath);
     fontOptions.value = await getFontsList(bpStore.dataPath);
     fontDisplayNames.value = fontOptions.value.map(f => f.name);
-    if (fontOptions.value.length > 0) {
+    if (fontOptions.value.length > 0 && !fontOptions.value.some(f => f.value === fontFamily.value)) {
       fontFamily.value = fontOptions.value[0].value;
     }
   } catch (error) {

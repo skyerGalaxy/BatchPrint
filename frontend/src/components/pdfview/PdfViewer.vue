@@ -25,7 +25,7 @@ import { ref, onMounted, watch, nextTick } from "vue";
 import { useBPStore } from '@/stores/bpstore';
 import LocationDialog from "./LocationDialog.vue";
 import { loadCustomFonts } from '@/utils/fontLoader';
-import { fi } from "vuetify/locale";
+import type { StoreIcon, Condition as IconCondition } from '@/types/icon';
 
 
 PDFJS.GlobalWorkerOptions.workerSrc = new URL(
@@ -54,44 +54,6 @@ const pointer_y = ref(0);
 const dialog = ref(false);
 
 const bpStore = useBPStore();
-
-// Icon 相关类型定义（与 store 保存结构一致）
-interface IconOption {
-  type: 'field' | 'image';
-  fieldName?: string;
-  fontFamily?: string;
-  fontWeight?: number;
-  opacity?: number;
-  color?: string;
-  src?: string;
-}
-
-interface IconCondition {
-  id?: number;
-  field: string | null;
-  op: string;
-  value: string;
-}
-
-interface ConditionGroup {
-  id: number;
-  matchMode: string;
-  conditions: IconCondition[];
-}
-
-interface StoreIcon {
-  id: number;
-  mode: 'single' | 'conditional';
-  pageIndex: number;
-  pointer: { clientX: number; clientY: number };
-  option: IconOption;
-  logicType?: string;
-  conditions?: IconCondition[];
-  matchMode?: string;
-  groups?: ConditionGroup[];
-  groupConnectors?: string[];
-  size?: number;
-}
 
 const icons = ref<StoreIcon[]>([]);
 const selectedIcon = ref<StoreIcon | null>(null);
@@ -138,16 +100,17 @@ const renderPage = (num: number) => {
 
     // 获取容器宽度（决定显示大小）
     const containerWidth = pdfContainerRef.value?.clientWidth || 800;
+    const pageRatio = viewport.width / viewport.height;
 
-    // 根据A4比例计算显示高度
-    const displayWidth = Math.min(containerWidth * 0.9, 900); // 保留10%边距，最大宽900px
-    const displayHeight = (displayWidth * 297) / 210; // 保持A4比例
+    const maxDisplayWidth = pageRatio > 1
+      ? Math.min(containerWidth * 0.95, 1300)
+      : Math.min(containerWidth * 0.9, 900);
 
-    // 设置canvas绘制分辨率（清晰度）
+    const displayWidth = maxDisplayWidth;
+    const displayHeight = displayWidth / pageRatio;
+
     canvas.width = viewport.width;
     canvas.height = viewport.height;
-
-    // 设置在页面上的显示比例（仅视觉缩放）
     canvas.style.width = `${displayWidth}px`;
     canvas.style.height = `${displayHeight}px`;
 
@@ -628,11 +591,10 @@ watch(
   overflow: visible;
 }
 
-/* 每页保持 A4 比例、居中显示 */
+/* 页面容器：居中显示 */
 .pdf-page-wrapper {
   position: relative;
-  display: block;
-  width: 100%;
+  width: fit-content;
   margin: 12px auto;
 }
 
@@ -640,7 +602,6 @@ watch(
   display: block;
   background: white;
   box-shadow: 0 0 8px rgba(0, 0, 0, 0.15);
-  aspect-ratio: 210 / 297; /* 强制A4比例 */
 }
 
 .overlay-canvas {
@@ -648,7 +609,6 @@ watch(
   top: 0;
   left: 0;
   cursor: grab;
-  aspect-ratio: 210 / 297;
 }
 
 .overlay-canvas:active {
