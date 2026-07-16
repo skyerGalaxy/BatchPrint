@@ -404,6 +404,7 @@ const insertPart = (part: NamePart) => {
   nameParts.value.splice(idx, 0, part)
   insertIndex.value = idx + 1
   addMenuOpen.value = false
+  nameInputRef.value?.focus()
 }
 
 const partIcons: Partial<Record<NamePart['type'], string>> = {
@@ -473,11 +474,12 @@ const normalizeSeps = () => {
 }
 
 const removeNamePart = (index: number) => {
-  nameParts.value.splice(index, 1)
+  const parts = nameParts.value
+  parts.splice(index, 1)
   if (insertIndex.value > index) {
     insertIndex.value--
   }
-  normalizeSeps()
+  nameInputRef.value?.focus()
 }
 
 const handleNameKeydown = (e: KeyboardEvent) => {
