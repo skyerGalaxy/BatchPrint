@@ -24,6 +24,7 @@ const navItems = [
   { title: '签字', value: 'signature', icon: 'mdi-draw-pen' },
   { title: '印章', value: 'seal', icon: 'mdi-seal-variant' },
   { title: '图标', value: 'icon', icon: 'mdi-shape-outline' },
+  { title: '文本', value: 'text', icon: 'mdi-format-text' },
 ];
 
 const selectedImageType = ref<'signature' | 'seal' | null>(null);
@@ -32,7 +33,7 @@ const selectedImageIndex = ref<number | null>(null);
 const selectedField = ref<string | null>(null);
 
 const size = ref(120);
-const fontFamily = ref('微软雅黑');
+const fontFamily = ref('楷体');
 const fontOptions = ref<Font[]>([]);
 const fontDisplayNames = ref<string[]>([]);
 
@@ -42,6 +43,12 @@ const colorMenu = ref(false);
 
 const iconChar = ref('✓');
 const iconGroup = ref('marks');
+
+const textContent = ref('自定义文本');
+const textFontWeight = ref(400);
+const textColor = ref('#000000');
+const textOpacity = ref(1);
+const textColorMenu = ref(false);
 const iconGroups = [
   {
     value: 'marks',
@@ -186,6 +193,7 @@ async function loadFonts() {
   } catch (error) {
     console.error('加载字体列表失败:', error);
     fontOptions.value = [
+      { name: '楷体', value: '楷体', type: 'system' },
       { name: '微软雅黑', value: '微软雅黑', type: 'system' },
       { name: '宋体', value: '宋体', type: 'system' },
       { name: '黑体', value: '黑体', type: 'system' },
@@ -255,6 +263,25 @@ function selectIcon(char: string) {
     icon: char,
     color: color.value,
     opacity: opacity.value,
+    size: size.value,
+  });
+}
+
+async function selectText() {
+  if (!textContent.value) return;
+
+  let fontValue = fontFamily.value;
+  if (fontDisplayNames.value.includes(fontFamily.value)) {
+    fontValue = await getFontValueByName(fontFamily.value, bpStore.dataPath);
+  }
+
+  emits('select_option', {
+    type: 'text',
+    text: textContent.value,
+    fontFamily: fontValue,
+    fontWeight: textFontWeight.value,
+    color: textColor.value,
+    opacity: textOpacity.value,
     size: size.value,
   });
 }
@@ -590,6 +617,112 @@ async function deleteImage(type: 'signature' | 'seal', index: number) {
               color: color
             }"
           >{{ iconChar }}</span>
+        </div>
+      </div>
+
+      <div v-else-if="activeNav === 'text'" class="mp-text-panel">
+        <div class="mp-text-input-wrap">
+          <v-textarea
+            v-model="textContent"
+            density="compact"
+            variant="outlined"
+            hide-details
+            placeholder="输入自定义文本"
+            rows="2"
+            class="bento-textarea"
+            @update:model-value="selectText()"
+          />
+        </div>
+
+        <div class="style-card">
+          <div class="mp-ctrl-row">
+            <v-icon size="16" color="#94a3b8">mdi-format-font</v-icon>
+            <v-select
+              v-model="fontFamily"
+              :items="fontOptions"
+              item-title="name"
+              item-value="value"
+              density="compact"
+              variant="outlined"
+              hide-details
+              class="bento-select"
+              @update:model-value="selectText()"
+            />
+          </div>
+          <div class="mp-ctrl-row">
+            <v-icon size="16" color="#94a3b8">mdi-format-bold</v-icon>
+            <v-btn-toggle
+              v-model="textFontWeight"
+              mandatory
+              density="compact"
+              variant="outlined"
+              divided
+              class="weight-toggle"
+              @update:model-value="selectText()"
+            >
+              <v-btn :value="400" size="x-small">常规</v-btn>
+              <v-btn :value="700" size="x-small">粗体</v-btn>
+            </v-btn-toggle>
+          </div>
+          <div class="mp-ctrl-row">
+            <v-icon size="16" color="#94a3b8">mdi-opacity</v-icon>
+            <v-slider
+              v-model="textOpacity"
+              density="compact"
+              hide-details
+              :min="0.1"
+              :max="1"
+              :step="0.05"
+              thumb-size="16"
+              track-size="3"
+              class="bento-slider"
+              @update:model-value="selectText()"
+            />
+          </div>
+          <div class="mp-ctrl-row">
+            <v-icon size="16" color="#94a3b8">mdi-palette</v-icon>
+            <v-menu v-model="textColorMenu" :close-on-content-click="false" offset="8">
+              <template #activator="{ props: menuProps }">
+                <div class="color-swatch" :style="{ background: textColor }" v-bind="menuProps"></div>
+              </template>
+              <v-color-picker
+                v-model="textColor"
+                mode="hex"
+                hide-inputs
+                @update:model-value="selectText(); textColorMenu = false"
+              />
+            </v-menu>
+            <span class="color-hex">{{ textColor }}</span>
+          </div>
+          <div class="mp-ctrl-row">
+            <v-icon size="16" color="#94a3b8">mdi-arrow-expand-all</v-icon>
+            <span class="mp-size-label" style="flex-shrink:0">大小</span>
+            <v-text-field
+              v-model.number="size"
+              type="number"
+              density="compact"
+              variant="outlined"
+              hide-details
+              :min="20"
+              :max="400"
+              class="mp-text-size-input"
+              @update:model-value="selectText()"
+            />
+          </div>
+        </div>
+
+        <div class="mp-preview-box">
+          <span class="mp-preview-label">预览</span>
+          <span
+            class="mp-preview-text"
+            :style="{
+              fontFamily: fontFamily,
+              fontSize: Math.min(size, 28) + 'px',
+              fontWeight: textFontWeight,
+              opacity: textOpacity,
+              color: textColor
+            }"
+          >{{ textContent || '预览文字' }}</span>
         </div>
       </div>
     </div>
@@ -1156,5 +1289,65 @@ async function deleteImage(type: 'signature' | 'seal', index: number) {
   font-size: 12.5px !important;
   padding: 6px 10px !important;
   min-height: auto !important;
+}
+
+/* ========= text panel ========= */
+.mp-text-panel {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: hidden;
+}
+
+.mp-text-input-wrap {
+  flex-shrink: 0;
+}
+
+.mp-text-input-wrap :deep(.v-field) {
+  border-radius: 10px !important;
+  box-shadow: none !important;
+  border-color: rgba(0,0,0,0.1) !important;
+}
+
+.mp-text-input-wrap :deep(.v-field__input) {
+  font-size: 13px !important;
+  padding: 8px 10px !important;
+}
+
+.bento-textarea :deep(.v-field) {
+  border-radius: 10px !important;
+}
+
+.weight-toggle {
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.weight-toggle :deep(.v-btn) {
+  min-width: 48px !important;
+  padding: 0 12px !important;
+  height: 28px !important;
+  font-size: 12px !important;
+  text-transform: none !important;
+  letter-spacing: 0 !important;
+  border-color: rgba(0,0,0,0.12) !important;
+}
+
+.mp-text-size-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.mp-text-size-input :deep(.v-field) {
+  border-radius: 8px !important;
+  border-color: #e2e8f0 !important;
+}
+
+.mp-text-size-input :deep(.v-field__input) {
+  font-size: 12px !important;
+  padding: 4px 8px !important;
+  min-height: auto !important;
+  text-align: center;
 }
 </style>

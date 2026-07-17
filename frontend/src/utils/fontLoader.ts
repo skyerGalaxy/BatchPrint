@@ -47,6 +47,7 @@ export async function fetchFontsList(fontsPath?: string): Promise<Font[]> {
   } catch (error) {
     console.error('获取字体列表失败:', error);
     return [
+      { name: '楷体', value: '楷体', type: 'system' },
       { name: '微软雅黑', value: '微软雅黑', type: 'system' },
       { name: '宋体', value: '宋体', type: 'system' },
       { name: '黑体', value: '黑体', type: 'system' },
@@ -102,7 +103,7 @@ export async function getFontDisplayNames(fontsPath?: string): Promise<string[]>
     return fonts.map(f => f.name);
   } catch (error) {
     console.error('获取字体显示名称失败:', error);
-    return ['微软雅黑', '宋体', '黑体', 'Arial', 'Times New Roman'];
+    return ['楷体', '微软雅黑', '宋体', '黑体', 'Arial', 'Times New Roman'];
   }
 }
 

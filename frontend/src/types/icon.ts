@@ -16,7 +16,7 @@ export interface ConditionGroup {
 }
 
 export interface IconOption {
-  type: 'field' | 'image' | 'icon'
+  type: 'field' | 'image' | 'icon' | 'text'
   fieldName?: string
   fontFamily?: string
   fontWeight?: number
@@ -24,6 +24,7 @@ export interface IconOption {
   color?: string
   src?: string
   icon?: string
+  text?: string
   size?: number
 }
 

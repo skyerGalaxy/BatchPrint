@@ -292,7 +292,7 @@
               {{ resultSuccess ? 'mdi-check-circle' : 'mdi-alert-circle' }}
             </v-icon>
             <v-card-title class="pa-0">
-              {{ resultSuccess ? '生成成功' : '生成失败' }}
+              {{ resultSuccess ? '生成成功' : '提示' }}
             </v-card-title>
           </div>
         </v-card-item>
@@ -609,6 +609,14 @@ const generateBatchPDF = async () => {
   if (!bpStore.excelFile) {
     resultSuccess.value = false
     resultMessage.value = '请先选择Excel数据文件'
+    resultPath.value = ''
+    resultDialog.value = true
+    return
+  }
+
+  if (bpStore.iconList.length === 0) {
+    resultSuccess.value = false
+    resultMessage.value = '请先在PDF模板上放置图章/签名标注，图标列表为空'
     resultPath.value = ''
     resultDialog.value = true
     return

@@ -22,8 +22,10 @@
 
     const selectedPath = ref<string>('');
 
-    //控制是否移动选项对话框
     const isMovingDialog = ref(false)
+    const moveResultDialog = ref(false)
+    const moveResultSuccess = ref(false)
+    const moveResultMessage = ref('')
 
     const bpStore = useBPStore();
 
@@ -137,10 +139,18 @@
                 mkdir(`${path}/fonts`, { recursive: true }),
             ]);
             await updateDataPath(path);
+            await loadFontList();
+            await notifyFontsChanged();
             isMovingDialog.value = false;
-            console.log('文件夹创建并路径已更新');
+            moveResultSuccess.value = true;
+            moveResultMessage.value = '文件夹创建成功，存储路径已更新！';
         } catch (error) {
             console.error('创建文件夹失败:', error);
+            isMovingDialog.value = false;
+            moveResultSuccess.value = false;
+            moveResultMessage.value = `创建文件夹失败: ${error}`;
+        } finally {
+            moveResultDialog.value = true;
         }
     }
 
@@ -153,10 +163,18 @@
             console.log('移动结果:', result);
             
             await updateDataPath(newPath);
+            await loadFontList();
+            await notifyFontsChanged();
             isMovingDialog.value = false;
-            console.log('文件夹移动成功');
+            moveResultSuccess.value = true;
+            moveResultMessage.value = '文件移动成功，存储路径已更新！';
         } catch (error) {
             console.error('移动文件夹失败:', error);
+            isMovingDialog.value = false;
+            moveResultSuccess.value = false;
+            moveResultMessage.value = `文件移动失败: ${error}`;
+        } finally {
+            moveResultDialog.value = true;
         }
     }
 
@@ -303,6 +321,30 @@
             <v-card-actions class="d-flex justify-end">
                 <v-btn text @click="createFolder(selectedPath)">否</v-btn>
                 <v-btn color="primary" @click="moveFolders(selectedPath)">是</v-btn>
+            </v-card-actions>
+        </v-card>
+    </v-dialog>
+    <v-dialog
+        v-model="moveResultDialog"
+        max-width="440"
+    >
+        <v-card>
+            <v-card-item>
+                <div class="d-flex align-center">
+                    <v-icon :color="moveResultSuccess ? 'success' : 'error'" size="28" class="mr-3">
+                        {{ moveResultSuccess ? 'mdi-check-circle' : 'mdi-alert-circle' }}
+                    </v-icon>
+                    <v-card-title class="pa-0">
+                        {{ moveResultSuccess ? '操作成功' : '操作失败' }}
+                    </v-card-title>
+                </div>
+            </v-card-item>
+            <v-card-text>
+                <p class="text-body-2">{{ moveResultMessage }}</p>
+            </v-card-text>
+            <v-card-actions>
+                <v-spacer></v-spacer>
+                <v-btn variant="text" @click="moveResultDialog = false">确定</v-btn>
             </v-card-actions>
         </v-card>
     </v-dialog>

@@ -37,6 +37,7 @@ app.add_middleware(
 def register_custom_fonts():
     system_font_map = {
         "微软雅黑": "msyh.ttc",
+        "楷体": "simkai.ttf",
         "宋体": "simsun.ttc",
         "黑体": "simhei.ttc",
     }
@@ -90,6 +91,7 @@ def register_user_fonts(fonts_dir_str: str):
 async def get_fonts_list(request: Request, fonts_path: str = None):
     fonts: list = [
         {"name": "微软雅黑", "value": "微软雅黑", "type": "system"},
+        {"name": "楷体", "value": "楷体", "type": "system"},
         {"name": "宋体", "value": "宋体", "type": "system"},
         {"name": "黑体", "value": "黑体", "type": "system"},
         {"name": "Arial", "value": "Arial", "type": "system"},
@@ -383,6 +385,17 @@ async def generate_batch_pdf(
                     field_value = str(row_data[field_name])
                     applied_font = _apply_font_style(overlay_pdf, font_family, font_weight, font_size, item_color, item_opacity)
                     _draw_centred_text(overlay_pdf, 0, 0, field_value, applied_font, font_size)
+
+            elif item_type == "text":
+                text_value = option.get("text", "")
+                font_family = option.get("fontFamily", "楷体")
+                font_weight = option.get("fontWeight", 400)
+                text_color = option.get("color", "#000000")
+                text_opacity = option.get("opacity", 1.0)
+                font_size = max(8, math.floor(size * 0.3))
+                if text_value:
+                    applied_font = _apply_font_style(overlay_pdf, font_family, font_weight, font_size, text_color, text_opacity)
+                    _draw_centred_text(overlay_pdf, 0, 0, text_value, applied_font, font_size)
 
             elif item_type == "image":
                 src = option.get("src")

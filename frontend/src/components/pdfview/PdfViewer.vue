@@ -13,6 +13,7 @@
         @mouseleave="onCanvasMouseLeave"
         @mousedown="onCanvasMouseDown($event, pageIndex)"
         @mouseup="onCanvasMouseUp"
+        @dblclick="onCanvasDblClick($event, pageIndex)"
       />
     </div>
   </div>
@@ -21,7 +22,7 @@
 
 <script setup lang="ts">
 import * as PDFJS from "pdfjs-dist";
-import { ref, onMounted, watch, nextTick } from "vue";
+import { ref, onMounted, onUnmounted, watch, nextTick } from "vue";
 import { useBPStore } from '@/stores/bpstore';
 import LocationDialog from "./LocationDialog.vue";
 import { loadCustomFonts } from '@/utils/fontLoader';
@@ -68,6 +69,10 @@ const rotateIcon = ref<StoreIcon | null>(null);
 const rotateStartAngle = ref(0);
 const rotateStartRotation = ref(0);
 const imageCache = new Map<string, HTMLImageElement>();
+
+const copiedIcon = ref<StoreIcon | null>(null);
+const lastMouseCoords = ref({ x: 0, y: 0 });
+const lastMousePageIndex = ref(1);
 
 const BTN_R = 10;
 const BTN_PAD = 5;
@@ -211,6 +216,8 @@ function hitCornerButton(point: { x: number; y: number }, icon: StoreIcon): 'del
 
 function onCanvasMouseMove(e: MouseEvent, pageIndex: number) {
   const coords = getCanvasCoordinates(e, pageIndex);
+  lastMouseCoords.value = coords;
+  lastMousePageIndex.value = pageIndex;
 
   if (isRotating.value && rotateIcon.value) {
     const dx = coords.x - rotateIcon.value.pointer.clientX;
@@ -302,6 +309,55 @@ function onCanvasMouseUp() {
   isRotating.value = false;
   resizeIcon.value = null;
   rotateIcon.value = null;
+}
+
+function onCanvasDblClick(e: MouseEvent, pageIndex: number) {
+  const coords = getCanvasCoordinates(e, pageIndex);
+  const pageIcons = icons.value.filter(icon => icon.pageIndex === pageIndex);
+  for (const icon of pageIcons) {
+    if (isPointInIcon(coords, icon)) {
+      openLocationDialog(icon);
+      return;
+    }
+  }
+}
+
+function openLocationDialog(icon: StoreIcon) {
+  indexOfPage.value = icon.pageIndex;
+  pointer_x.value = icon.pointer.clientX;
+  pointer_y.value = icon.pointer.clientY;
+  dialog.value = true;
+}
+
+function handleKeyDown(e: KeyboardEvent) {
+  if (!selectedIcon.value) return;
+
+  if (e.ctrlKey && e.key === 'c') {
+    e.preventDefault();
+    copiedIcon.value = JSON.parse(JSON.stringify(selectedIcon.value));
+  }
+
+  if (e.ctrlKey && e.key === 'v') {
+    e.preventDefault();
+    if (!copiedIcon.value) return;
+    const clone = JSON.parse(JSON.stringify(copiedIcon.value)) as StoreIcon;
+    const maxId = icons.value.reduce((max, i) => Math.max(max, i.id), 0);
+    clone.id = maxId + 1;
+    const offsetX = lastMouseCoords.value.x - clone.pointer.clientX;
+    const offsetY = lastMouseCoords.value.y - clone.pointer.clientY;
+    if (Math.abs(offsetX) < 5 && Math.abs(offsetY) < 5) {
+      clone.pointer.clientX += 30;
+      clone.pointer.clientY += 30;
+    } else {
+      clone.pointer.clientX = lastMouseCoords.value.x;
+      clone.pointer.clientY = lastMouseCoords.value.y;
+    }
+    clone.pageIndex = lastMousePageIndex.value;
+    clone.scale = bpStore.pdfScale;
+    icons.value.push(clone);
+    selectedIcon.value = clone;
+    redrawIcons(clone.pageIndex);
+  }
 }
 
 // 删除 icon
@@ -423,10 +479,18 @@ function checkIconConditions(icon: StoreIcon): boolean {
 function getIconBounds(icon: StoreIcon): { halfW: number; halfH: number } {
   const s = getIconSize(icon);
   if (icon.option.type === 'field') {
-    const fontFamily = icon.option.fontFamily || '微软雅黑';
+    const fontFamily = icon.option.fontFamily || '楷体';
     const fontSize = Math.max(8, Math.floor(s * 0.3));
     const fieldValue = getFieldValue(icon.option.fieldName || '');
     const charCount = fieldValue.length || 1;
+    const halfW = Math.max(14, Math.floor(fontSize * charCount * 0.45));
+    const halfH = Math.max(8, Math.floor(fontSize * 0.5));
+    return { halfW, halfH };
+  }
+  if (icon.option.type === 'text') {
+    const fontSize = Math.max(8, Math.floor(s * 0.3));
+    const textValue = icon.option.text || '';
+    const charCount = textValue.length || 1;
     const halfW = Math.max(14, Math.floor(fontSize * charCount * 0.45));
     const halfH = Math.max(8, Math.floor(fontSize * 0.5));
     return { halfW, halfH };
@@ -497,7 +561,7 @@ function drawIcon(ctx: CanvasRenderingContext2D, icon: StoreIcon, isSelected: bo
   if (rotation !== 0) ctx.rotate(rotation * Math.PI / 180);
 
   if (icon.option.type === 'field') {
-    const fontFamily = icon.option.fontFamily || '微软雅黑';
+    const fontFamily = icon.option.fontFamily || '楷体';
     const fontSize = Math.max(8, Math.floor(size * 0.3));
     drawFieldText(ctx,
       icon.option.fieldName || '',
@@ -508,6 +572,16 @@ function drawIcon(ctx: CanvasRenderingContext2D, icon: StoreIcon, isSelected: bo
       icon.option.color ?? '#000000',
       0, 0
     );
+  } else if (icon.option.type === 'text') {
+    const fontFamily = icon.option.fontFamily || '楷体';
+    const fontSize = Math.max(8, Math.floor(size * 0.3));
+    ctx.globalAlpha = icon.option.opacity ?? 1;
+    ctx.fillStyle = icon.option.color ?? '#000000';
+    ctx.font = `${icon.option.fontWeight ?? 400} ${fontSize}px "${fontFamily}"`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(icon.option.text || '', 0, 0);
+    ctx.globalAlpha = 1;
   } else if (icon.option.type === 'image') {
     drawImageIcon(ctx, icon.option.src || '', 0, 0, size, icon.pageIndex);
   } else if (icon.option.type === 'icon') {
@@ -549,6 +623,7 @@ function drawIcon(ctx: CanvasRenderingContext2D, icon: StoreIcon, isSelected: bo
 
 // 初始化
 onMounted(async () => {
+  document.addEventListener('keydown', handleKeyDown);
   // 先加载自定义字体
   await loadCustomFonts(bpStore.dataPath);
   bpStore.pdfScale = pdfScale.value;
@@ -556,6 +631,10 @@ onMounted(async () => {
   // 然后加载 PDF
   loadFile(props.pdfSrc);
   loadIconsFromStore();
+});
+
+onUnmounted(() => {
+  document.removeEventListener('keydown', handleKeyDown);
 });
 
 // 当传入的 PDF 路径变化时重新加载
