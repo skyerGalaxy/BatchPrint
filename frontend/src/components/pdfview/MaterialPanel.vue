@@ -5,6 +5,7 @@ import { getFontsList, getFontValueByName, loadCustomFonts } from '@/utils/fontL
 import { open } from '@tauri-apps/plugin-dialog';
 import { readFile, writeFile, exists, mkdir, readDir, remove } from '@tauri-apps/plugin-fs';
 import { convertFileSrc } from '@tauri-apps/api/core';
+import type { IconOption } from '@/types/icon';
 
 interface Font {
   name: string;
@@ -14,23 +15,24 @@ interface Font {
   url?: string;
 }
 
+const props = withDefaults(defineProps<{
+  activeNav?: string;
+  initialField?: string | null;
+  initialOption?: IconOption | null;
+}>(), {
+  activeNav: 'table',
+  initialField: null,
+  initialOption: null,
+});
+
 const emits = defineEmits(['select_option']);
 
 const bpStore = useBPStore();
 
-const activeNav = ref('table');
-const navItems = [
-  { title: '表格', value: 'table', icon: 'mdi-table' },
-  { title: '签字', value: 'signature', icon: 'mdi-draw-pen' },
-  { title: '印章', value: 'seal', icon: 'mdi-seal-variant' },
-  { title: '图标', value: 'icon', icon: 'mdi-shape-outline' },
-  { title: '文本', value: 'text', icon: 'mdi-format-text' },
-];
-
 const selectedImageType = ref<'signature' | 'seal' | null>(null);
 const selectedImageIndex = ref<number | null>(null);
 
-const selectedField = ref<string | null>(null);
+const selectedField = ref<string | null>(props.initialField);
 
 const size = ref(120);
 const fontFamily = ref('楷体');
@@ -49,6 +51,7 @@ const textFontWeight = ref(400);
 const textColor = ref('#000000');
 const textOpacity = ref(1);
 const textColorMenu = ref(false);
+const selectedOption = ref<IconOption | null>(props.initialOption);
 const iconGroups = [
   {
     value: 'marks',
@@ -182,6 +185,14 @@ watch(() => bpStore.fontsVersion, async () => {
   await loadFonts();
 });
 
+watch(() => props.initialField, (field) => {
+  selectedField.value = field;
+});
+
+watch(() => props.initialOption, (option) => {
+  selectedOption.value = option;
+});
+
 async function loadFonts() {
   try {
     await loadCustomFonts(bpStore.dataPath);
@@ -210,11 +221,66 @@ function selectImage(type: 'signature' | 'seal', index: number) {
   selectedImageType.value = type;
   selectedImageIndex.value = index;
   const list = type === 'signature' ? bpStore.imageList_signature : bpStore.imageList_seal;
-  emits('select_option', {
+  selectOption({
     type: 'image',
     src: list[index] ?? '',
     size: size.value,
   });
+}
+
+function startDrag(event: DragEvent, option: IconOption, panel: string) {
+  if (!event.dataTransfer) return;
+  event.dataTransfer.effectAllowed = 'copy';
+  event.dataTransfer.setData('application/x-batchprint-option', JSON.stringify({ option, panel }));
+}
+
+function selectOption(option: IconOption) {
+  selectedOption.value = option;
+  emits('select_option', option);
+}
+
+function startFieldDrag(event: DragEvent, fieldName: string) {
+  const option: IconOption = {
+    type: 'field',
+    fieldName,
+    fontFamily: fontFamily.value,
+    size: size.value,
+  };
+  selectOption(option);
+  startDrag(event, option, 'table');
+}
+
+function startImageDrag(event: DragEvent, type: 'signature' | 'seal', index: number) {
+  const list = type === 'signature' ? bpStore.imageList_signature : bpStore.imageList_seal;
+  const option: IconOption = { type: 'image', src: list[index] ?? '', size: size.value };
+  selectOption(option);
+  startDrag(event, option, type);
+}
+
+function startIconDrag(event: DragEvent, char: string) {
+  const option: IconOption = {
+    type: 'icon',
+    icon: char,
+    color: color.value,
+    opacity: opacity.value,
+    size: size.value,
+  };
+  selectOption(option);
+  startDrag(event, option, 'icon');
+}
+
+function startTextDrag(event: DragEvent) {
+  const option: IconOption = {
+    type: 'text',
+    text: textContent.value || '自定义文本',
+    fontFamily: fontFamily.value,
+    fontWeight: textFontWeight.value,
+    color: textColor.value,
+    opacity: textOpacity.value,
+    size: size.value,
+  };
+  selectOption(option);
+  startDrag(event, option, 'text');
 }
 
 function applyImageSize(val: number) {
@@ -248,7 +314,7 @@ async function selectField(fieldName: string | null = null) {
     fontValue = await getFontValueByName(fontFamily.value, bpStore.dataPath);
   }
 
-  emits('select_option', {
+  selectOption({
     type: 'field',
     fieldName: actualFieldName,
     fontFamily: fontValue,
@@ -258,7 +324,7 @@ async function selectField(fieldName: string | null = null) {
 
 function selectIcon(char: string) {
   iconChar.value = char;
-  emits('select_option', {
+  selectOption({
     type: 'icon',
     icon: char,
     color: color.value,
@@ -275,7 +341,7 @@ async function selectText() {
     fontValue = await getFontValueByName(fontFamily.value, bpStore.dataPath);
   }
 
-  emits('select_option', {
+  selectOption({
     type: 'text',
     text: textContent.value,
     fontFamily: fontValue,
@@ -376,21 +442,8 @@ async function deleteImage(type: 'signature' | 'seal', index: number) {
 
 <template>
   <div class="material-panel">
-    <div class="mp-sidebar">
-      <div
-        v-for="item in navItems"
-        :key="item.value"
-        class="mp-sidebar-item"
-        :class="{ active: activeNav === item.value }"
-        @click="activeNav = item.value"
-      >
-        <v-icon :icon="item.icon" size="20" class="mp-sidebar-icon" />
-        <span class="mp-sidebar-label">{{ item.title }}</span>
-      </div>
-    </div>
-
     <div class="mp-main">
-      <div v-if="activeNav === 'table'" class="mp-table-panel">
+      <div v-if="props.activeNav === 'table'" class="mp-table-panel">
         <div class="mp-table-left">
           <div class="bento-section-label">
             <v-icon size="14" class="section-label-icon">mdi-form-select</v-icon>
@@ -401,8 +454,10 @@ async function deleteImage(type: 'signature' | 'seal', index: number) {
               v-for="item in bpStore.fieldNames"
               :key="item"
               class="mp-field-chip"
+              draggable="true"
               :class="{ selected: selectedField === item }"
               @click="selectedField = item; selectField(item)"
+              @dragstart="startFieldDrag($event, item)"
             >
               <span class="field-chip-text">{{ item }}</span>
               <v-icon v-if="selectedField === item" size="16" class="field-chip-check">mdi-check-circle</v-icon>
@@ -446,13 +501,15 @@ async function deleteImage(type: 'signature' | 'seal', index: number) {
         </div>
       </div>
 
-      <div v-else-if="activeNav === 'signature'" class="mp-image-panel">
+      <div v-else-if="props.activeNav === 'signature'" class="mp-image-panel">
         <div class="mp-image-grid">
           <div class="mp-image-wrap" v-for="(imgSrc, index) in bpStore.imageList_signature" :key="index">
             <div
               class="mp-image-card"
+              draggable="true"
               :class="{ selected: selectedImageType === 'signature' && selectedImageIndex === index }"
               @click="selectImage('signature', index)"
+              @dragstart="startImageDrag($event, 'signature', index)"
             >
               <img :src="imgSrc" />
               <div class="mp-delete-btn" @click.stop="deleteImage('signature', index)" title="删除">
@@ -495,13 +552,15 @@ async function deleteImage(type: 'signature' | 'seal', index: number) {
         </div>
       </div>
 
-      <div v-else-if="activeNav === 'seal'" class="mp-image-panel">
+      <div v-else-if="props.activeNav === 'seal'" class="mp-image-panel">
         <div class="mp-image-grid">
           <div class="mp-image-wrap" v-for="(imgSrc, index) in bpStore.imageList_seal" :key="index">
             <div
               class="mp-image-card"
+              draggable="true"
               :class="{ selected: selectedImageType === 'seal' && selectedImageIndex === index }"
               @click="selectImage('seal', index)"
+              @dragstart="startImageDrag($event, 'seal', index)"
             >
               <img :src="imgSrc" />
               <div class="mp-delete-btn" @click.stop="deleteImage('seal', index)" title="删除">
@@ -544,7 +603,7 @@ async function deleteImage(type: 'signature' | 'seal', index: number) {
         </div>
       </div>
 
-      <div v-else-if="activeNav === 'icon'" class="mp-icon-panel">
+      <div v-else-if="props.activeNav === 'icon'" class="mp-icon-panel">
         <div class="mp-icon-groups">
           <v-chip-group v-model="iconGroup" selected-class="text-primary" column>
             <v-chip
@@ -563,8 +622,10 @@ async function deleteImage(type: 'signature' | 'seal', index: number) {
             v-for="icon in (iconGroups.find(g => g.value === iconGroup) || iconGroups[0]).icons"
             :key="icon.char"
             class="mp-icon-cell"
+            draggable="true"
             :class="{ selected: iconChar === icon.char }"
             @click="selectIcon(icon.char)"
+            @dragstart="startIconDrag($event, icon.char)"
           >
             <span
               class="mp-icon-char"
@@ -620,7 +681,7 @@ async function deleteImage(type: 'signature' | 'seal', index: number) {
         </div>
       </div>
 
-      <div v-else-if="activeNav === 'text'" class="mp-text-panel">
+      <div v-else-if="props.activeNav === 'text'" class="mp-text-panel">
         <div class="mp-text-input-wrap">
           <v-textarea
             v-model="textContent"
@@ -724,6 +785,10 @@ async function deleteImage(type: 'signature' | 'seal', index: number) {
             }"
           >{{ textContent || '预览文字' }}</span>
         </div>
+        <div class="mp-drag-source" draggable="true" @dragstart="startTextDrag">
+          <v-icon size="16">mdi-cursor-move</v-icon>
+          拖动文本到 PDF
+        </div>
       </div>
     </div>
   </div>
@@ -739,59 +804,10 @@ async function deleteImage(type: 'signature' | 'seal', index: number) {
   gap: 0;
 }
 
-/* ========= sidebar ========= */
-.mp-sidebar {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  padding: 8px 4px;
-  background: transparent;
-  overflow-y: auto;
-}
-
-.mp-sidebar-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  width: 48px;
-  height: 48px;
-  border-radius: 12px;
-  cursor: pointer;
-  transition: all 0.18s ease;
-  color: #94a3b8;
-  gap: 2px;
-}
-
-.mp-sidebar-item:hover {
-  background: rgba(79, 140, 255, 0.06);
-  color: #4f8cff;
-}
-
-.mp-sidebar-item.active {
-  background: linear-gradient(135deg, rgba(79,140,255,0.12), rgba(108,92,231,0.08));
-  color: #4f8cff;
-}
-
-.mp-sidebar-icon {
-  transition: transform 0.18s ease;
-}
-
-.mp-sidebar-item.active .mp-sidebar-icon {
-  transform: scale(1.05);
-}
-
-.mp-sidebar-label {
-  font-size: 10px;
-  font-weight: 600;
-  white-space: nowrap;
-  line-height: 1;
-}
-
 /* ========= main ========= */
 .mp-main {
   min-width: 0;
+  width: 100%;
   padding: 8px 12px 8px 4px;
   overflow: hidden;
 }
@@ -1298,6 +1314,21 @@ async function deleteImage(type: 'signature' | 'seal', index: number) {
   flex-direction: column;
   gap: 10px;
   overflow: hidden;
+}
+
+.mp-drag-source {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding: 8px 10px;
+  border: 1px dashed rgba(79, 140, 255, 0.35);
+  border-radius: 10px;
+  color: #4f8cff;
+  font-size: 12px;
+  cursor: grab;
+  background: rgba(79, 140, 255, 0.04);
 }
 
 .mp-text-input-wrap {

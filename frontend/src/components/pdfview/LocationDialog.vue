@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, watch } from "vue";
 import { useBPStore } from "@/stores/bpstore";
 import MaterialPanel from "./MaterialPanel.vue";
 import type { Condition, ConditionGroup, IconOption, LogicType, MatchMode, StoreIcon } from "@/types/icon";
@@ -16,6 +16,18 @@ const props = defineProps({
   pointer: {
     type: Object as () => { clientX: number; clientY: number },
     required: true
+  },
+  initialPanel: {
+    type: String,
+    default: 'table'
+  },
+  initialOption: {
+    type: Object as () => IconOption | null,
+    default: null
+  },
+  initialField: {
+    type: String,
+    default: null
   }
 });
 
@@ -26,7 +38,11 @@ const step = ref(1);
 
 const bpStore = useBPStore();
 
-const selectedOption = ref<IconOption | null>(null);
+const selectedOption = ref<IconOption | null>(props.initialOption);
+
+watch(() => props.initialOption, (option) => {
+  selectedOption.value = option;
+});
 
 const ops = ['等于', '不等于', '包含', '不包含', '为空', '不为空'];
 
@@ -280,6 +296,9 @@ function handleCancel() {
         <v-tabs-window v-model="tab" class="loc-tabs-window">
           <v-tabs-window-item value="1">
             <material-panel
+              :active-nav="props.initialPanel"
+              :initial-field="props.initialField"
+              :initial-option="props.initialOption"
               @select_option="selectedOption = $event"
             />
           </v-tabs-window-item>
@@ -446,6 +465,9 @@ function handleCancel() {
               </v-window-item>
               <v-window-item :value="2">
                 <material-panel
+                  :active-nav="props.initialPanel"
+                  :initial-field="props.initialField"
+                  :initial-option="props.initialOption"
                   @select_option="selectedOption = $event"
                 />
               </v-window-item>

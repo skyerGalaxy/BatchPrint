@@ -49,22 +49,28 @@
             </div>
 
             <div class="section field-section">
-              <div class="section-label">字段</div>
-              <div v-if="bpStore.fieldNames.length === 0" class="field-empty">
-                选择 Excel 后自动显示字段标签
-              </div>
-              <div v-else class="field-chips">
-                <v-chip
-                  v-for="fieldName in bpStore.fieldNames"
-                  :key="fieldName"
-                  color="primary"
-                  variant="tonal"
-                  size="small"
-                  draggable
+              <div class="section-label">材料</div>
+              <div class="material-nav">
+                <button
+                  v-for="item in materialNavItems"
+                  :key="item.value"
+                  type="button"
+                  class="material-nav-item"
+                  :class="[`material-nav-item--${item.value}`, { active: activeMaterialNav === item.value }]"
+                  @click="toggleMaterialNav(item.value)"
                 >
-                  {{ fieldName }}
-                </v-chip>
+                  <v-icon size="18">{{ item.icon }}</v-icon>
+                  <span>{{ item.title }}</span>
+                  <v-icon v-if="item.value === 'table'" size="14" class="material-nav-chevron">
+                    {{ activeMaterialNav === 'table' ? 'mdi-chevron-up' : 'mdi-chevron-down' }}
+                  </v-icon>
+                </button>
               </div>
+              <v-expand-transition>
+                <div v-if="activeMaterialNav" class="material-panel-host">
+                  <MaterialPanel :active-nav="activeMaterialNav" />
+                </div>
+              </v-expand-transition>
             </div>
 
             <div class="section filename-section">
@@ -368,6 +374,19 @@ import { useBPStore } from '@/stores/bpstore'
 
 const pdfSrc = ref<string>('')
 const bpStore = useBPStore()
+
+const activeMaterialNav = ref('table')
+const materialNavItems = [
+  { title: '表格', value: 'table', icon: 'mdi-table' },
+  { title: '签字', value: 'signature', icon: 'mdi-draw-pen' },
+  { title: '印章', value: 'seal', icon: 'mdi-seal-variant' },
+  { title: '图标', value: 'icon', icon: 'mdi-shape-outline' },
+  { title: '文本', value: 'text', icon: 'mdi-format-text' },
+]
+
+const toggleMaterialNav = (value: string) => {
+  activeMaterialNav.value = value === 'table' && activeMaterialNav.value === 'table' ? '' : value
+}
 
 const mergedCellsDialog = ref(false)
 const excelErrorDialog = ref(false)
@@ -774,6 +793,60 @@ const handleReset = () => {
   min-height: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+}
+
+.material-nav {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.material-nav-item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+  min-height: 34px;
+  padding: 4px 5px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--material-color) 8%, white);
+  color: var(--material-color);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 600;
+  transition: background 0.15s, border-color 0.15s, transform 0.15s;
+}
+
+.material-nav-item:hover,
+.material-nav-item.active {
+  background: color-mix(in srgb, var(--material-color) 16%, white);
+  border-color: color-mix(in srgb, var(--material-color) 30%, white);
+  transform: translateY(-1px);
+}
+
+.material-nav-item--table { --material-color: #2563eb; }
+.material-nav-item--signature { --material-color: #0f766e; }
+.material-nav-item--seal { --material-color: #c2410c; }
+.material-nav-item--icon { --material-color: #7c3aed; }
+.material-nav-item--text { --material-color: #be185d; }
+
+.material-nav-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.material-nav-chevron {
+  margin-left: -2px;
+}
+
+.material-panel-host {
+  min-height: 150px;
+  margin-top: 8px;
   overflow: hidden;
 }
 

@@ -14,10 +14,19 @@
         @mousedown="onCanvasMouseDown($event, pageIndex)"
         @mouseup="onCanvasMouseUp"
         @dblclick="onCanvasDblClick($event, pageIndex)"
+        @dragover.prevent="onCanvasDragOver"
+        @drop.prevent="onCanvasDrop($event, pageIndex)"
       />
     </div>
   </div>
-  <LocationDialog v-model:dialog="dialog" :pageIndex="indexOfPage" :pointer="{ clientX: pointer_x, clientY: pointer_y }" />
+  <LocationDialog
+    v-model:dialog="dialog"
+    :pageIndex="indexOfPage"
+    :pointer="{ clientX: pointer_x, clientY: pointer_y }"
+    :initial-panel="dialogPanel"
+    :initial-option="dialogOption"
+    :initial-field="dialogField ?? undefined"
+  />
 </template>
 
 <script setup lang="ts">
@@ -51,6 +60,9 @@ const pdfContainerRef = ref<HTMLElement | null>(null);
 const indexOfPage = ref(1);
 const pointer_x = ref(0);
 const pointer_y = ref(0);
+const dialogPanel = ref('table');
+const dialogOption = ref<any>(null);
+const dialogField = ref<string | null>(null);
 
 const dialog = ref(false);
 
@@ -152,6 +164,9 @@ function onCanvasClick(e: MouseEvent, pageIndex: number) {
   const clientY = e.clientY;
 
   indexOfPage.value = pageIndex;
+  dialogPanel.value = 'table';
+  dialogOption.value = null;
+  dialogField.value = null;
 
   // 将屏幕坐标转换为 canvas 绘制坐标（与 canvas.width / canvas.height 对应）
   pointer_x.value = (clientX - rect.left) * (canvas.width / rect.width);
@@ -159,6 +174,34 @@ function onCanvasClick(e: MouseEvent, pageIndex: number) {
 
   // 保留原来的行为：切换对话框显示
   dialog.value = !dialog.value;
+}
+
+function onCanvasDragOver(e: DragEvent) {
+  if (e.dataTransfer?.types.includes('application/x-batchprint-option')) {
+    e.dataTransfer.dropEffect = 'copy';
+  }
+}
+
+function onCanvasDrop(e: DragEvent, pageIndex: number) {
+  const raw = e.dataTransfer?.getData('application/x-batchprint-option');
+  if (!raw) return;
+
+  try {
+    const payload = JSON.parse(raw) as { option?: any; panel?: string };
+    if (!payload.option || !payload.panel) return;
+    const canvas = document.getElementById(`overlay-canvas-${pageIndex}`) as HTMLCanvasElement | null;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    indexOfPage.value = pageIndex;
+    pointer_x.value = (e.clientX - rect.left) * (canvas.width / rect.width);
+    pointer_y.value = (e.clientY - rect.top) * (canvas.height / rect.height);
+    dialogPanel.value = payload.panel;
+    dialogOption.value = payload.option;
+    dialogField.value = payload.option.type === 'field' ? payload.option.fieldName ?? null : null;
+    dialog.value = true;
+  } catch {
+    dialogOption.value = null;
+  }
 }
 
 
