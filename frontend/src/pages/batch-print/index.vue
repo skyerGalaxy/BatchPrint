@@ -56,19 +56,111 @@
                   :key="item.value"
                   type="button"
                   class="material-nav-item"
-                  :class="[`material-nav-item--${item.value}`, { active: activeMaterialNav === item.value }]"
+                  :class="[
+                    `material-nav-item--${item.value}`,
+                    { active: activeMaterialNav === item.value }
+                  ]"
                   @click="toggleMaterialNav(item.value)"
                 >
                   <v-icon size="18">{{ item.icon }}</v-icon>
                   <span>{{ item.title }}</span>
-                  <v-icon v-if="item.value === 'table'" size="14" class="material-nav-chevron">
-                    {{ activeMaterialNav === 'table' ? 'mdi-chevron-up' : 'mdi-chevron-down' }}
+                  <v-icon size="14" class="material-nav-chevron">
+                    {{ activeMaterialNav === item.value ? 'mdi-chevron-up' : 'mdi-chevron-down' }}
                   </v-icon>
                 </button>
               </div>
               <v-expand-transition>
-                <div v-if="activeMaterialNav" class="material-panel-host">
-                  <MaterialPanel :active-nav="activeMaterialNav" />
+                <div v-if="activeMaterialNav" class="material-expand-host">
+                  <!-- 表格：字段 chip 列表 -->
+                  <template v-if="activeMaterialNav === 'table'">
+                    <div v-if="bpStore.fieldNames.length === 0" class="expand-empty-tip">
+                      请先选择 Excel 文件
+                    </div>
+                    <div v-else class="field-chip-list">
+                      <div
+                        v-for="item in bpStore.fieldNames"
+                        :key="item"
+                        class="field-chip"
+                        draggable="true"
+                        @dragstart="startFieldDrag($event, item)"
+                      >
+                        {{ item }}
+                      </div>
+                    </div>
+                  </template>
+
+                  <!-- 签字：图片缩略图 -->
+                  <template v-else-if="activeMaterialNav === 'signature'">
+                    <div v-if="bpStore.imageList_signature.length === 0" class="expand-empty-tip">
+                      暂无签字图片，请前往素材库添加
+                    </div>
+                    <div v-else class="thumb-grid">
+                      <div
+                        v-for="(img, idx) in bpStore.imageList_signature"
+                        :key="idx"
+                        class="thumb-card"
+                        draggable="true"
+                        @dragstart="startImageDrag($event, 'signature', idx)"
+                      >
+                        <img :src="img" />
+                      </div>
+                    </div>
+                  </template>
+
+                  <!-- 印章：图片缩略图 -->
+                  <template v-else-if="activeMaterialNav === 'seal'">
+                    <div v-if="bpStore.imageList_seal.length === 0" class="expand-empty-tip">
+                      暂无印章图片，请前往素材库添加
+                    </div>
+                    <div v-else class="thumb-grid">
+                      <div
+                        v-for="(img, idx) in bpStore.imageList_seal"
+                        :key="idx"
+                        class="thumb-card"
+                        draggable="true"
+                        @dragstart="startImageDrag($event, 'seal', idx)"
+                      >
+                        <img :src="img" />
+                      </div>
+                    </div>
+                  </template>
+
+                  <!-- 图标：紧凑图标网格 -->
+                  <template v-else-if="activeMaterialNav === 'icon'">
+                    <div class="icon-mini-grid">
+                      <div
+                        v-for="g in iconGroups"
+                        :key="g.value"
+                        class="icon-mini-group"
+                      >
+                        <div class="icon-mini-label">{{ g.label }}</div>
+                        <div class="icon-mini-row">
+                          <div
+                            v-for="ic in g.icons"
+                            :key="ic.char"
+                            class="icon-mini-cell"
+                            :title="ic.label"
+                            draggable="true"
+                            @dragstart="startIconDrag($event, ic.char)"
+                          >
+                            {{ ic.char }}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </template>
+
+                  <!-- 文本：可拖拽文本卡片 -->
+                  <template v-else-if="activeMaterialNav === 'text'">
+                    <div class="text-drag-card" draggable="true" @dragstart="startTextDrag($event)">
+                      <v-icon size="18" color="#be185d">mdi-format-text</v-icon>
+                      <div class="text-drag-info">
+                        <span class="text-drag-title">自定义文本</span>
+                        <span class="text-drag-hint">拖到 PDF 上编辑文字</span>
+                      </div>
+                      <v-icon size="16" class="text-drag-grip">mdi-drag-vertical</v-icon>
+                    </div>
+                  </template>
                 </div>
               </v-expand-transition>
             </div>
@@ -371,6 +463,7 @@ import { ref, computed, onMounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import PdfViewer from '@/components/pdfview/PdfViewer.vue'
 import { useBPStore } from '@/stores/bpstore'
+import type { IconOption } from '@/types/icon'
 
 const pdfSrc = ref<string>('')
 const bpStore = useBPStore()
@@ -385,7 +478,85 @@ const materialNavItems = [
 ]
 
 const toggleMaterialNav = (value: string) => {
-  activeMaterialNav.value = value === 'table' && activeMaterialNav.value === 'table' ? '' : value
+  activeMaterialNav.value = activeMaterialNav.value === value ? '' : value
+}
+
+function startFieldDrag(event: DragEvent, fieldName: string) {
+  if (!event.dataTransfer) return
+  const option: IconOption = {
+    type: 'field',
+    fieldName,
+    fontFamily: '楷体',
+    size: 120,
+  }
+  event.dataTransfer.effectAllowed = 'copy'
+  event.dataTransfer.setData('application/x-batchprint-option', JSON.stringify({ option, panel: 'table' }))
+}
+
+const iconGroups = [
+  { value: 'marks', label: '复选框', icons: [
+    { char: '☐', label: '空方框' }, { char: '☑', label: '勾选方框' },
+    { char: '☒', label: '叉选方框' }, { char: '✓', label: '对勾' },
+    { char: '✗', label: '叉号' }, { char: '✔', label: '粗对勾' },
+    { char: '✘', label: '粗叉号' }, { char: '●', label: '实心圆' },
+  ]},
+  { value: 'stars', label: '星形', icons: [
+    { char: '★', label: '实心星' }, { char: '☆', label: '空心星' },
+    { char: '✦', label: '四角星' }, { char: '✧', label: '空心四角' },
+    { char: '◆', label: '实心菱形' }, { char: '◇', label: '空心菱形' },
+    { char: '■', label: '实心方块' }, { char: '□', label: '空心方块' },
+  ]},
+  { value: 'arrows', label: '箭头', icons: [
+    { char: '→', label: '右箭头' }, { char: '←', label: '左箭头' },
+    { char: '↑', label: '上箭头' }, { char: '↓', label: '下箭头' },
+    { char: '↔', label: '左右箭头' }, { char: '↕', label: '上下箭头' },
+    { char: '▶', label: '右三角' }, { char: '◀', label: '左三角' },
+  ]},
+  { value: 'shapes', label: '图形', icons: [
+    { char: '▲', label: '实心三角' }, { char: '△', label: '空心三角' },
+    { char: '▼', label: '倒三角' }, { char: '▽', label: '空心倒三角' },
+    { char: '○', label: '空心圆' }, { char: '♥', label: '红心' },
+    { char: '♦', label: '方块' }, { char: '♣', label: '梅花' },
+  ]},
+  { value: 'office', label: '办公', icons: [
+    { char: '☎', label: '电话' }, { char: '✉', label: '信封' },
+    { char: '✎', label: '铅笔' }, { char: '⌂', label: '房子' },
+    { char: '⌘', label: '命令键' }, { char: '⏎', label: '回车' },
+    { char: '⌫', label: '退格' }, { char: '☺', label: '笑脸' },
+  ]},
+  { value: 'info', label: '提示', icons: [
+    { char: '⚡', label: '闪电' }, { char: '⚠', label: '警告' },
+    { char: 'ℹ', label: '信息' }, { char: '©', label: '版权' },
+    { char: '®', label: '注册商标' }, { char: '™', label: '商标' },
+    { char: '♻', label: '回收' }, { char: '☹', label: '哭脸' },
+  ]},
+]
+
+function startImageDrag(event: DragEvent, type: 'signature' | 'seal', index: number) {
+  if (!event.dataTransfer) return
+  const list = type === 'signature' ? bpStore.imageList_signature : bpStore.imageList_seal
+  const option: IconOption = { type: 'image', src: list[index] ?? '', size: 120 }
+  event.dataTransfer.effectAllowed = 'copy'
+  event.dataTransfer.setData('application/x-batchprint-option', JSON.stringify({ option, panel: type }))
+}
+
+function startIconDrag(event: DragEvent, char: string) {
+  if (!event.dataTransfer) return
+  const option: IconOption = {
+    type: 'icon', icon: char, color: '#000000', opacity: 1, size: 120,
+  }
+  event.dataTransfer.effectAllowed = 'copy'
+  event.dataTransfer.setData('application/x-batchprint-option', JSON.stringify({ option, panel: 'icon' }))
+}
+
+function startTextDrag(event: DragEvent) {
+  if (!event.dataTransfer) return
+  const option: IconOption = {
+    type: 'text', text: '自定义文本', fontFamily: '楷体',
+    fontWeight: 400, color: '#000000', opacity: 1, size: 120,
+  }
+  event.dataTransfer.effectAllowed = 'copy'
+  event.dataTransfer.setData('application/x-batchprint-option', JSON.stringify({ option, panel: 'text' }))
 }
 
 const mergedCellsDialog = ref(false)
@@ -844,25 +1015,209 @@ const handleReset = () => {
   margin-left: -2px;
 }
 
-.material-panel-host {
-  min-height: 150px;
+.material-expand-host {
+  flex: 1;
+  min-height: 0;
   margin-top: 8px;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
 }
 
-.field-empty {
+.expand-empty-tip {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   font-size: 0.8rem;
   color: rgb(148, 163, 184);
-  padding: 12px 0;
+  text-align: center;
 }
 
-.field-chips {
+/* ---- field chips ---- */
+.field-chip-list {
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-wrap: wrap;
+  align-content: flex-start;
   gap: 6px;
   padding: 4px 0;
   overflow-y: auto;
   overscroll-behavior: contain;
+}
+
+.field-chip {
+  padding: 6px 12px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(79,140,255,0.08), rgba(108,92,231,0.05));
+  border: 1px solid rgba(79,140,255,0.35);
+  cursor: grab;
+  transition: all 0.15s ease;
+  user-select: none;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: #2563eb;
+}
+
+.field-chip:hover {
+  background: linear-gradient(135deg, rgba(79,140,255,0.15), rgba(108,92,231,0.1));
+  border-color: rgba(79,140,255,0.55);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(79,140,255,0.15);
+}
+
+.field-chip:active {
+  cursor: grabbing;
+  transform: translateY(0);
+}
+
+/* ---- signature / seal thumbnails ---- */
+.thumb-grid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  padding: 4px 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.thumb-card {
+  aspect-ratio: 1;
+  border-radius: 10px;
+  background: #f1f5f9;
+  border: 2px solid transparent;
+  cursor: grab;
+  overflow: hidden;
+  transition: all 0.15s ease;
+  opacity: 0.85;
+}
+
+.thumb-card img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.thumb-card:hover {
+  opacity: 1;
+  border-color: rgba(15,118,110,0.4);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.thumb-card:active {
+  cursor: grabbing;
+  transform: translateY(0);
+}
+
+/* ---- icon mini grid ---- */
+.icon-mini-grid {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.icon-mini-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.icon-mini-label {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.icon-mini-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.icon-mini-cell {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  font-family: "Segoe UI Symbol", "Segoe UI Emoji", sans-serif;
+  font-size: 16px;
+  cursor: grab;
+  background: #f8fafc;
+  border: 1px solid transparent;
+  transition: all 0.12s ease;
+}
+
+.icon-mini-cell:hover {
+  background: linear-gradient(135deg, rgba(124,58,237,0.1), rgba(168,85,247,0.05));
+  border-color: rgba(124,58,237,0.35);
+  color: #7c3aed;
+  transform: scale(1.1);
+}
+
+.icon-mini-cell:active {
+  cursor: grabbing;
+  transform: scale(1);
+}
+
+/* ---- text drag card ---- */
+.text-drag-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, rgba(190,24,93,0.06), rgba(219,39,119,0.03));
+  border: 1px dashed rgba(190,24,93,0.35);
+  cursor: grab;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.text-drag-card:hover {
+  border-style: solid;
+  background: linear-gradient(135deg, rgba(190,24,93,0.1), rgba(219,39,119,0.06));
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(190,24,93,0.12);
+}
+
+.text-drag-card:active {
+  cursor: grabbing;
+  transform: translateY(0);
+}
+
+.text-drag-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.text-drag-title {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #be185d;
+}
+
+.text-drag-hint {
+  font-size: 0.68rem;
+  color: #94a3b8;
+}
+
+.text-drag-grip {
+  color: rgba(190,24,93,0.3);
 }
 
 /* ---- filename ---- */

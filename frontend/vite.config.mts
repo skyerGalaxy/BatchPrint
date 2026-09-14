@@ -86,6 +86,13 @@ export default defineConfig({
   server: {
     strictPort: true,
     port: 3000,
+    watch: {
+      ignored: [
+        '**/src-tauri/target/**',
+        '**/src-tauri/gen/**',
+        '**/node_modules/**',
+      ],
+    },
   },
   envPrefix:['VITE_', 'TAURI_ENV_*'],
   build: {
