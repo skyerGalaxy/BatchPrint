@@ -50,7 +50,7 @@
 
             <div class="section field-section">
               <div class="section-label">材料</div>
-              <div class="material-nav">
+              <div class="material-nav" @mouseleave="clearHoverTimer">
                 <button
                   v-for="item in materialNavItems"
                   :key="item.value"
@@ -60,18 +60,18 @@
                     `material-nav-item--${item.value}`,
                     { active: activeMaterialNav === item.value }
                   ]"
-                  @click="toggleMaterialNav(item.value)"
+                  @mouseenter="setActiveNav(item.value)"
+                  @focus="setActiveNav(item.value)"
+                  @click="activeMaterialNav = item.value"
                 >
                   <v-icon size="18">{{ item.icon }}</v-icon>
                   <span>{{ item.title }}</span>
-                  <v-icon size="14" class="material-nav-chevron">
-                    {{ activeMaterialNav === item.value ? 'mdi-chevron-up' : 'mdi-chevron-down' }}
-                  </v-icon>
                 </button>
               </div>
-              <v-expand-transition>
-                <div v-if="activeMaterialNav" class="material-expand-host">
-                  <!-- 表格：字段 chip 列表 -->
+              <div class="material-expand-host">
+                <Transition name="material-fade" mode="out-in">
+                  <div :key="activeMaterialNav" class="material-stage-inner">
+                  <!-- 表格：解析 Excel 的字段 -->
                   <template v-if="activeMaterialNav === 'table'">
                     <div v-if="bpStore.fieldNames.length === 0" class="expand-empty-tip">
                       请先选择 Excel 文件
@@ -89,16 +89,16 @@
                     </div>
                   </template>
 
-                  <!-- 签字：图片缩略图 -->
+                  <!-- 签字：设置路径下的签字内容 -->
                   <template v-else-if="activeMaterialNav === 'signature'">
                     <div v-if="bpStore.imageList_signature.length === 0" class="expand-empty-tip">
-                      暂无签字图片，请前往素材库添加
+                      设置路径下暂无签字图片
                     </div>
                     <div v-else class="thumb-grid">
                       <div
                         v-for="(img, idx) in bpStore.imageList_signature"
                         :key="idx"
-                        class="thumb-card"
+                        class="thumb-card thumb-card--signature"
                         draggable="true"
                         @dragstart="startImageDrag($event, 'signature', idx)"
                       >
@@ -107,16 +107,16 @@
                     </div>
                   </template>
 
-                  <!-- 印章：图片缩略图 -->
+                  <!-- 印章：设置路径下的印章内容 -->
                   <template v-else-if="activeMaterialNav === 'seal'">
                     <div v-if="bpStore.imageList_seal.length === 0" class="expand-empty-tip">
-                      暂无印章图片，请前往素材库添加
+                      设置路径下暂无印章图片
                     </div>
                     <div v-else class="thumb-grid">
                       <div
                         v-for="(img, idx) in bpStore.imageList_seal"
                         :key="idx"
-                        class="thumb-card"
+                        class="thumb-card thumb-card--seal"
                         draggable="true"
                         @dragstart="startImageDrag($event, 'seal', idx)"
                       >
@@ -125,7 +125,7 @@
                     </div>
                   </template>
 
-                  <!-- 图标：紧凑图标网格 -->
+                  <!-- 图标：预设图标 -->
                   <template v-else-if="activeMaterialNav === 'icon'">
                     <div class="icon-mini-grid">
                       <div
@@ -150,19 +150,43 @@
                     </div>
                   </template>
 
-                  <!-- 文本：可拖拽文本卡片 -->
+                  <!-- 文本：预设文本 chips，+ chip 打开文本窗口添加自定义文字 -->
                   <template v-else-if="activeMaterialNav === 'text'">
-                    <div class="text-drag-card" draggable="true" @dragstart="startTextDrag($event)">
-                      <v-icon size="18" color="#be185d">mdi-format-text</v-icon>
-                      <div class="text-drag-info">
-                        <span class="text-drag-title">自定义文本</span>
-                        <span class="text-drag-hint">拖到 PDF 上编辑文字</span>
+                    <div class="text-stage">
+                      <div v-if="textPresets.length === 0" class="expand-empty-tip">
+                        暂无文本预设，点击下方「+ 添加文本」创建自定义文字
                       </div>
-                      <v-icon size="16" class="text-drag-grip">mdi-drag-vertical</v-icon>
+                      <div v-else class="text-preset-list">
+                        <div
+                          v-for="preset in textPresets"
+                          :key="preset.id"
+                          class="text-preset-chip"
+                          :title="`拖动「${preset.text}」到 PDF`"
+                          draggable="true"
+                          @dragstart="startPresetTextDrag($event, preset)"
+                        >
+                          <span class="text-preset-label" :style="presetPreviewStyle(preset)">
+                            {{ preset.text }}
+                          </span>
+                          <button
+                            type="button"
+                            class="text-preset-del"
+                            title="删除预设"
+                            @click.stop="deleteTextPreset(preset.id)"
+                          >
+                            <v-icon size="12">mdi-close</v-icon>
+                          </button>
+                        </div>
+                      </div>
+                      <button type="button" class="text-preset-add" @click="openTextDialog">
+                        <v-icon size="16">mdi-plus</v-icon>
+                        <span>添加文本</span>
+                      </button>
                     </div>
                   </template>
-                </div>
-              </v-expand-transition>
+                  </div>
+                </Transition>
+              </div>
             </div>
 
             <div class="section filename-section">
@@ -454,16 +478,133 @@
         </v-card-actions>
       </v-card>
     </v-dialog>
+
+    <!-- 文本预设编辑窗口 -->
+    <v-dialog v-model="textDialogOpen" max-width="430">
+      <v-card class="text-dialog-card" rounded="xl" elevation="8">
+        <v-card-item class="text-dialog-header">
+          <v-icon color="#be185d" size="20" class="mr-2">mdi-format-text</v-icon>
+          <v-card-title class="text-dialog-title">添加文本预设</v-card-title>
+        </v-card-item>
+
+        <v-card-text class="text-dialog-body">
+          <v-textarea
+            v-model="textForm.text"
+            density="compact"
+            variant="outlined"
+            hide-details
+            placeholder="输入自定义文本"
+            rows="2"
+            auto-grow
+            class="text-dialog-textarea"
+          />
+
+          <div class="text-dialog-row">
+            <v-icon size="16" color="#94a3b8">mdi-format-font</v-icon>
+            <v-select
+              v-model="textForm.fontFamily"
+              :items="fontOptions"
+              item-title="name"
+              item-value="value"
+              density="compact"
+              variant="outlined"
+              hide-details
+              class="text-dialog-select"
+            />
+          </div>
+
+          <div class="text-dialog-row">
+            <v-icon size="16" color="#94a3b8">mdi-format-bold</v-icon>
+            <v-btn-toggle
+              v-model="textForm.fontWeight"
+              mandatory
+              density="compact"
+              variant="outlined"
+              divided
+              class="text-weight-toggle"
+            >
+              <v-btn :value="400" size="x-small">常规</v-btn>
+              <v-btn :value="700" size="x-small">粗体</v-btn>
+            </v-btn-toggle>
+            <v-icon size="16" color="#94a3b8" class="ml-3">mdi-arrow-expand-all</v-icon>
+            <v-text-field
+              v-model.number="textForm.size"
+              type="number"
+              density="compact"
+              variant="outlined"
+              hide-details
+              :min="20"
+              :max="400"
+              class="text-size-field"
+            />
+          </div>
+
+          <div class="text-dialog-row">
+            <v-icon size="16" color="#94a3b8">mdi-opacity</v-icon>
+            <v-slider
+              v-model="textForm.opacity"
+              density="compact"
+              hide-details
+              :min="0.1"
+              :max="1"
+              :step="0.05"
+              thumb-size="16"
+              track-size="3"
+              color="#be185d"
+              class="text-dialog-slider"
+            />
+          </div>
+
+          <div class="text-dialog-row">
+            <v-icon size="16" color="#94a3b8">mdi-palette</v-icon>
+            <v-menu v-model="textColorMenu" :close-on-content-click="false" offset="8">
+              <template #activator="{ props: menuProps }">
+                <div class="text-color-swatch" :style="{ background: textForm.color }" v-bind="menuProps"></div>
+              </template>
+              <v-color-picker
+                v-model="textForm.color"
+                mode="hex"
+                hide-inputs
+                @update:model-value="textColorMenu = false"
+              />
+            </v-menu>
+            <span class="text-color-hex">{{ textForm.color }}</span>
+          </div>
+
+          <div class="text-preview-box">
+            <span class="text-preview-label">预览</span>
+            <span class="text-preview-value" :style="presetPreviewStyle(textForm)">
+              {{ textForm.text || '预览文字' }}
+            </span>
+          </div>
+        </v-card-text>
+
+        <v-card-actions class="text-dialog-actions">
+          <v-spacer></v-spacer>
+          <v-btn variant="text" rounded="lg" @click="textDialogOpen = false">取消</v-btn>
+          <v-btn
+            variant="flat"
+            rounded="lg"
+            color="#be185d"
+            :disabled="!textForm.text.trim()"
+            @click="saveTextPreset"
+          >保存预设</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </v-container>
 </template>
 
 <script setup lang="ts">
 import axios from 'axios'
-import { ref, computed, onMounted } from 'vue'
-import { invoke } from '@tauri-apps/api/core'
+import { ref, computed, onMounted, watch } from 'vue'
+import { invoke, convertFileSrc } from '@tauri-apps/api/core'
+import { readDir, exists } from '@tauri-apps/plugin-fs'
+import { Store } from '@tauri-apps/plugin-store'
 import PdfViewer from '@/components/pdfview/PdfViewer.vue'
 import { useBPStore } from '@/stores/bpstore'
 import type { IconOption } from '@/types/icon'
+import { getFontsList, loadCustomFonts } from '@/utils/fontLoader'
 
 const pdfSrc = ref<string>('')
 const bpStore = useBPStore()
@@ -477,8 +618,19 @@ const materialNavItems = [
   { title: '文本', value: 'text', icon: 'mdi-format-text' },
 ]
 
-const toggleMaterialNav = (value: string) => {
-  activeMaterialNav.value = activeMaterialNav.value === value ? '' : value
+// 鼠标停留切换材料板块（带短暂延迟，避免滑过时闪烁）
+let navHoverTimer: ReturnType<typeof setTimeout> | null = null
+function setActiveNav(value: string) {
+  if (navHoverTimer) clearTimeout(navHoverTimer)
+  navHoverTimer = setTimeout(() => {
+    activeMaterialNav.value = value
+  }, 80)
+}
+function clearHoverTimer() {
+  if (navHoverTimer) {
+    clearTimeout(navHoverTimer)
+    navHoverTimer = null
+  }
 }
 
 function startFieldDrag(event: DragEvent, fieldName: string) {
@@ -549,14 +701,160 @@ function startIconDrag(event: DragEvent, char: string) {
   event.dataTransfer.setData('application/x-batchprint-option', JSON.stringify({ option, panel: 'icon' }))
 }
 
-function startTextDrag(event: DragEvent) {
+/* ========= 文本预设 ========= */
+interface TextPreset {
+  id: string
+  text: string
+  fontFamily: string
+  fontWeight: number
+  color: string
+  opacity: number
+  size: number
+}
+
+interface FontOption {
+  name: string
+  value: string
+  type: 'system' | 'custom'
+  file?: string
+  url?: string
+}
+
+const textPresets = ref<TextPreset[]>([])
+const textDialogOpen = ref(false)
+const textColorMenu = ref(false)
+const fontOptions = ref<FontOption[]>([])
+
+function createEmptyTextForm(): TextPreset {
+  return {
+    id: '',
+    text: '',
+    fontFamily: fontOptions.value[0]?.value ?? '楷体',
+    fontWeight: 400,
+    color: '#000000',
+    opacity: 1,
+    size: 120,
+  }
+}
+
+const textForm = ref<TextPreset>(createEmptyTextForm())
+
+let textPresetStore: Store | null = null
+
+function genPresetId(): string {
+  return `tp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+}
+
+function openTextDialog() {
+  textForm.value = createEmptyTextForm()
+  textColorMenu.value = false
+  textDialogOpen.value = true
+}
+
+async function saveTextPreset() {
+  const text = textForm.value.text.trim()
+  if (!text) return
+  textPresets.value.push({ ...textForm.value, id: genPresetId(), text })
+  await persistTextPresets()
+  textDialogOpen.value = false
+}
+
+async function deleteTextPreset(id: string) {
+  textPresets.value = textPresets.value.filter(p => p.id !== id)
+  await persistTextPresets()
+}
+
+async function loadTextPresets() {
+  try {
+    textPresetStore = await Store.load('text_presets.json')
+    const saved = await textPresetStore.get<TextPreset[]>('presets')
+    textPresets.value = Array.isArray(saved) ? saved : []
+  } catch (error) {
+    console.error('加载文本预设失败:', error)
+    textPresets.value = []
+  }
+}
+
+async function persistTextPresets() {
+  try {
+    if (!textPresetStore) {
+      textPresetStore = await Store.load('text_presets.json')
+    }
+    await textPresetStore.set('presets', textPresets.value)
+    await textPresetStore.save()
+  } catch (error) {
+    console.error('保存文本预设失败:', error)
+  }
+}
+
+function presetPreviewStyle(preset: TextPreset) {
+  return {
+    fontFamily: preset.fontFamily,
+    fontWeight: preset.fontWeight,
+    color: preset.color,
+    opacity: preset.opacity,
+    fontSize: `${Math.max(10, Math.min(preset.size * 0.12, 18))}px`,
+  }
+}
+
+function startPresetTextDrag(event: DragEvent, preset: TextPreset) {
   if (!event.dataTransfer) return
   const option: IconOption = {
-    type: 'text', text: '自定义文本', fontFamily: '楷体',
-    fontWeight: 400, color: '#000000', opacity: 1, size: 120,
+    type: 'text',
+    text: preset.text,
+    fontFamily: preset.fontFamily,
+    fontWeight: preset.fontWeight,
+    color: preset.color,
+    opacity: preset.opacity,
+    size: preset.size,
   }
   event.dataTransfer.effectAllowed = 'copy'
   event.dataTransfer.setData('application/x-batchprint-option', JSON.stringify({ option, panel: 'text' }))
+}
+
+/* ========= 字体列表（文本预设弹窗用） ========= */
+async function loadFonts() {
+  try {
+    await loadCustomFonts(bpStore.dataPath)
+    fontOptions.value = await getFontsList(bpStore.dataPath)
+  } catch (error) {
+    console.error('加载字体列表失败:', error)
+    fontOptions.value = [
+      { name: '楷体', value: '楷体', type: 'system' },
+      { name: '微软雅黑', value: '微软雅黑', type: 'system' },
+      { name: '宋体', value: '宋体', type: 'system' },
+      { name: '黑体', value: '黑体', type: 'system' },
+      { name: 'Arial', value: 'Arial', type: 'system' },
+    ]
+  }
+}
+
+/* ========= 设置路径下的签字 / 印章图片 ========= */
+const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']
+
+async function loadImagesFromDir(dirPath: string): Promise<string[]> {
+  try {
+    if (!await exists(dirPath)) return []
+    const files = await readDir(dirPath)
+    return files
+      .filter(file => file.isFile)
+      .map(file => file.name)
+      .filter(name => imageExtensions.some(ext => name.toLowerCase().endsWith(ext)))
+      .map(name => convertFileSrc(`${dirPath}/${name}`))
+  } catch (error) {
+    console.error(`读取图片目录失败 ${dirPath}:`, error)
+    return []
+  }
+}
+
+async function refreshImageLists() {
+  if (!bpStore.dataPath) return
+  const [sig, seal] = await Promise.all([
+    loadImagesFromDir(`${bpStore.dataPath}/signImg`),
+    loadImagesFromDir(`${bpStore.dataPath}/sealImg`),
+  ])
+  bpStore.imageList_signature = sig
+  bpStore.imageList_seal = seal
 }
 
 const mergedCellsDialog = ref(false)
@@ -729,10 +1027,27 @@ async function apiPost(url: string, formData: FormData, retries = 30): Promise<a
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
   if (bpStore.pdfSrc) {
     pdfSrc.value = bpStore.pdfSrc
   }
+  await Promise.all([
+    loadFonts(),
+    loadTextPresets(),
+    refreshImageLists(),
+  ])
+})
+
+watch(() => bpStore.dataPath, async (newPath) => {
+  if (!newPath) return
+  await Promise.all([
+    loadFonts(),
+    refreshImageLists(),
+  ])
+})
+
+watch(() => bpStore.fontsVersion, () => {
+  loadFonts()
 })
 
 const handleFileChange = async (value: File | File[] | null) => {
@@ -1011,8 +1326,9 @@ const handleReset = () => {
   white-space: nowrap;
 }
 
-.material-nav-chevron {
-  margin-left: -2px;
+.material-nav-item:focus-visible {
+  outline: 2px solid rgba(79, 140, 255, 0.45);
+  outline-offset: 1px;
 }
 
 .material-expand-host {
@@ -1022,6 +1338,23 @@ const handleReset = () => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+.material-stage-inner {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.material-fade-enter-active,
+.material-fade-leave-active {
+  transition: opacity 0.14s ease;
+}
+
+.material-fade-enter-from,
+.material-fade-leave-to {
+  opacity: 0;
 }
 
 .expand-empty-tip {
@@ -1103,9 +1436,16 @@ const handleReset = () => {
 
 .thumb-card:hover {
   opacity: 1;
-  border-color: rgba(15,118,110,0.4);
   transform: translateY(-1px);
   box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.thumb-card--signature:hover {
+  border-color: rgba(15,118,110,0.45);
+}
+
+.thumb-card--seal:hover {
+  border-color: rgba(194,65,12,0.45);
 }
 
 .thumb-card:active {
@@ -1172,52 +1512,225 @@ const handleReset = () => {
   transform: scale(1);
 }
 
-/* ---- text drag card ---- */
-.text-drag-card {
+/* ---- text presets ---- */
+.text-stage {
+  flex: 1;
+  min-height: 0;
   display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.text-preset-list {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 6px;
+  padding: 4px 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.text-preset-chip {
+  display: inline-flex;
   align-items: center;
-  gap: 10px;
-  padding: 12px 14px;
-  border-radius: 10px;
-  background: linear-gradient(135deg, rgba(190,24,93,0.06), rgba(219,39,119,0.03));
-  border: 1px dashed rgba(190,24,93,0.35);
+  gap: 6px;
+  max-width: 100%;
+  padding: 5px 6px 5px 12px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(190,24,93,0.07), rgba(219,39,119,0.04));
+  border: 1px solid rgba(190,24,93,0.35);
   cursor: grab;
   transition: all 0.15s ease;
   user-select: none;
 }
 
-.text-drag-card:hover {
-  border-style: solid;
-  background: linear-gradient(135deg, rgba(190,24,93,0.1), rgba(219,39,119,0.06));
+.text-preset-chip:hover {
+  background: linear-gradient(135deg, rgba(190,24,93,0.12), rgba(219,39,119,0.08));
+  border-color: rgba(190,24,93,0.55);
   transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(190,24,93,0.12);
+  box-shadow: 0 2px 8px rgba(190,24,93,0.15);
 }
 
-.text-drag-card:active {
+.text-preset-chip:active {
   cursor: grabbing;
   transform: translateY(0);
 }
 
-.text-drag-info {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+.text-preset-label {
+  font-size: 0.8rem;
+  max-width: 180px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
-.text-drag-title {
+.text-preset-del {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(190,24,93,0.12);
+  color: #be185d;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s;
+}
+
+.text-preset-del:hover {
+  background: #be185d;
+  color: #fff;
+}
+
+.text-preset-add {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 14px;
+  border-radius: 16px;
+  border: 1px dashed rgba(190,24,93,0.45);
+  background: rgba(190,24,93,0.04);
+  color: #be185d;
   font-size: 0.78rem;
   font-weight: 600;
-  color: #be185d;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
 }
 
-.text-drag-hint {
-  font-size: 0.68rem;
+.text-preset-add:hover {
+  background: rgba(190,24,93,0.1);
+  border-style: solid;
+  transform: translateY(-1px);
+}
+
+/* ---- text preset dialog ---- */
+.text-dialog-header {
+  display: flex;
+  align-items: center;
+  padding-bottom: 0;
+}
+
+.text-dialog-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.text-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 8px !important;
+}
+
+.text-dialog-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.text-dialog-row > .v-icon {
+  flex-shrink: 0;
+}
+
+.text-dialog-select {
+  flex: 1;
+  min-width: 0;
+}
+
+.text-dialog-select :deep(.v-field) {
+  border-radius: 8px !important;
+  box-shadow: none !important;
+}
+
+.text-weight-toggle {
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.text-weight-toggle :deep(.v-btn) {
+  min-width: 48px !important;
+  padding: 0 12px !important;
+  height: 28px !important;
+  font-size: 12px !important;
+  text-transform: none !important;
+  letter-spacing: 0 !important;
+}
+
+.text-size-field {
+  width: 88px;
+  flex-shrink: 0;
+}
+
+.text-size-field :deep(.v-field) {
+  border-radius: 8px !important;
+  box-shadow: none !important;
+}
+
+.text-dialog-slider {
+  flex: 1;
+  min-width: 0;
+}
+
+.text-color-swatch {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  border: 1.5px solid rgba(0,0,0,0.15);
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.text-color-swatch:hover {
+  transform: scale(1.1);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+}
+
+.text-color-hex {
+  font-size: 12px;
+  font-weight: 500;
+  color: #475569;
+  font-family: 'SF Mono', 'Cascadia Code', monospace;
+}
+
+.text-preview-box {
+  padding: 14px 12px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #fdf2f8 0%, #fce7f3 100%);
+  border: 1px solid rgba(190,24,93,0.12);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 64px;
+  gap: 6px;
+}
+
+.text-preview-label {
+  font-size: 10px;
+  font-weight: 600;
   color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
 
-.text-drag-grip {
-  color: rgba(190,24,93,0.3);
+.text-preview-value {
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.text-dialog-actions {
+  padding: 8px 16px 16px;
 }
 
 /* ---- filename ---- */
