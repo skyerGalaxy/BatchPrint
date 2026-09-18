@@ -8,12 +8,12 @@
       <canvas
         :id="`overlay-canvas-${pageIndex}`"
         class="overlay-canvas"
-        @contextmenu.prevent="onCanvasClick($event, pageIndex)"
         @mousemove="onCanvasMouseMove($event, pageIndex)"
         @mouseleave="onCanvasMouseLeave"
         @mousedown="onCanvasMouseDown($event, pageIndex)"
         @mouseup="onCanvasMouseUp"
-        @dblclick="onCanvasDblClick($event, pageIndex)"
+        @contextmenu.prevent="onCanvasContextMenu($event, pageIndex)"
+        @dragenter.prevent="onCanvasDragEnter"
         @dragover.prevent="onCanvasDragOver"
         @drop.prevent="onCanvasDrop($event, pageIndex)"
       />
@@ -21,11 +21,10 @@
   </div>
   <LocationDialog
     v-model:dialog="dialog"
-    :pageIndex="indexOfPage"
+    :page-index="indexOfPage"
     :pointer="{ clientX: pointer_x, clientY: pointer_y }"
     :initial-panel="dialogPanel"
-    :initial-option="dialogOption"
-    :initial-field="dialogField ?? undefined"
+    :initial-icon="dialogIcon"
   />
 </template>
 
@@ -35,7 +34,7 @@ import { ref, onMounted, onUnmounted, watch, nextTick } from "vue";
 import { useBPStore } from '@/stores/bpstore';
 import LocationDialog from "./LocationDialog.vue";
 import { loadCustomFonts } from '@/utils/fontLoader';
-import type { StoreIcon, Condition as IconCondition } from '@/types/icon';
+import type { StoreIcon, Condition as IconCondition, IconOption, MaterialKind } from '@/types/icon';
 
 
 PDFJS.GlobalWorkerOptions.workerSrc = new URL(
@@ -60,9 +59,9 @@ const pdfContainerRef = ref<HTMLElement | null>(null);
 const indexOfPage = ref(1);
 const pointer_x = ref(0);
 const pointer_y = ref(0);
-const dialogPanel = ref('table');
-const dialogOption = ref<any>(null);
-const dialogField = ref<string | null>(null);
+const dialogPanel = ref<'table' | 'signature' | 'seal' | 'icon' | 'text'>('table');
+/** 双击编辑时传入的已有材料；右键空白新增时为 null */
+const dialogIcon = ref<StoreIcon | null>(null);
 
 const dialog = ref(false);
 
@@ -154,31 +153,19 @@ const renderPage = (num: number) => {
   });
 };
 
-// 点击时计算 canvas 内的绘制坐标（考虑了样式缩放）
-function onCanvasClick(e: MouseEvent, pageIndex: number) {
-  const canvas = document.getElementById(`pdf-canvas-${pageIndex}`) as HTMLCanvasElement | null;
-  if (!canvas) return;
-
-  const rect = canvas.getBoundingClientRect();
-  const clientX = e.clientX;
-  const clientY = e.clientY;
-
-  indexOfPage.value = pageIndex;
-  dialogPanel.value = 'table';
-  dialogOption.value = null;
-  dialogField.value = null;
-
-  // 将屏幕坐标转换为 canvas 绘制坐标（与 canvas.width / canvas.height 对应）
-  pointer_x.value = (clientX - rect.left) * (canvas.width / rect.width);
-  pointer_y.value = (clientY - rect.top) * (canvas.height / rect.height);
-
-  // 保留原来的行为：切换对话框显示
-  dialog.value = !dialog.value;
+function onCanvasDragEnter(e: DragEvent) {
+  // dragenter 也需要 preventDefault 才能在部分 WebView2 版本中允许 drop
+  if (e.dataTransfer) {
+    e.dataTransfer.dropEffect = 'copy';
+  }
 }
 
 function onCanvasDragOver(e: DragEvent) {
-  if (e.dataTransfer?.types.includes('application/x-batchprint-option')) {
-    e.dataTransfer.dropEffect = 'copy';
+  if (e.dataTransfer) {
+    // 只要是我们自定义的拖拽数据，就允许放置
+    if (e.dataTransfer.types?.includes('application/x-batchprint-option')) {
+      e.dataTransfer.dropEffect = 'copy';
+    }
   }
 }
 
@@ -187,20 +174,36 @@ function onCanvasDrop(e: DragEvent, pageIndex: number) {
   if (!raw) return;
 
   try {
-    const payload = JSON.parse(raw) as { option?: any; panel?: string };
-    if (!payload.option || !payload.panel) return;
+    const payload = JSON.parse(raw) as { option?: IconOption; panel?: string };
+    if (!payload.option) return;
+    // 同类型材料沿用上次确认的样式（载荷仅提供身份字段；文本预设自带样式）
+    const kind = (payload.panel || 'table') as MaterialKind;
+    const option = bpStore.instantiateOption(kind, payload.option);
     const canvas = document.getElementById(`overlay-canvas-${pageIndex}`) as HTMLCanvasElement | null;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
-    indexOfPage.value = pageIndex;
-    pointer_x.value = (e.clientX - rect.left) * (canvas.width / rect.width);
-    pointer_y.value = (e.clientY - rect.top) * (canvas.height / rect.height);
-    dialogPanel.value = payload.panel;
-    dialogOption.value = payload.option;
-    dialogField.value = payload.option.type === 'field' ? payload.option.fieldName ?? null : null;
-    dialog.value = true;
-  } catch {
-    dialogOption.value = null;
+    const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+    const y = (e.clientY - rect.top) * (canvas.height / rect.height);
+
+    // 拖放即落库：直接加入 iconList，字段类型渲染时自动取 Excel 对应字段的值
+    const maxId = icons.value.reduce((max, i) => Math.max(max, i.id), 0);
+    const size = option.size ?? 120;
+    const newIcon: StoreIcon = {
+      id: maxId + 1,
+      pageIndex,
+      pointer: { clientX: x, clientY: y },
+      mode: 'single',
+      option: { ...option, size },
+      size,
+      scale: bpStore.pdfScale,
+    };
+
+    bpStore.iconList.push(newIcon);
+    icons.value = bpStore.iconList as StoreIcon[];
+    selectedIcon.value = newIcon;
+    redrawIcons(pageIndex);
+  } catch (error) {
+    console.error('处理材料拖放失败:', error);
   }
 }
 
@@ -257,6 +260,29 @@ function hitCornerButton(point: { x: number; y: number }, icon: StoreIcon): 'del
   return null;
 }
 
+// 由 icon.option 反推材料类型，用于缩放后按类型记忆尺寸
+function iconMaterialKind(option: IconOption): MaterialKind {
+  switch (option.type) {
+    case 'field': return 'table';
+    case 'image': return option.imageKind === 'seal' ? 'seal' : 'signature';
+    case 'icon': return 'icon';
+    case 'text': return 'text';
+  }
+}
+
+// 缩放过程中防抖落盘：避免每次 mousemove 都写 store
+let resizeSaveTimer: ReturnType<typeof setTimeout> | null = null;
+const RESIZE_SAVE_DEBOUNCE = 500;
+
+function scheduleResizeSave(icon: StoreIcon) {
+  if (resizeSaveTimer) clearTimeout(resizeSaveTimer);
+  resizeSaveTimer = setTimeout(() => {
+    const kind = iconMaterialKind(icon.option);
+    void bpStore.saveMaterialStyle(kind, { size: icon.size });
+    resizeSaveTimer = null;
+  }, RESIZE_SAVE_DEBOUNCE);
+}
+
 function onCanvasMouseMove(e: MouseEvent, pageIndex: number) {
   const coords = getCanvasCoordinates(e, pageIndex);
   lastMouseCoords.value = coords;
@@ -278,8 +304,12 @@ function onCanvasMouseMove(e: MouseEvent, pageIndex: number) {
       Math.pow(coords.y - resizeIcon.value.pointer.clientY, 2)
     );
     const newSize = Math.max(20, resizeStartSize.value + (dist - resizeStartDist.value) * 2);
+    // 顶层 size 与 option.size 同步：前者用于画布渲染/后端生成，后者用于弹窗回显与确认
     resizeIcon.value.size = newSize;
+    resizeIcon.value.option.size = newSize;
     redrawIcons(pageIndex);
+    // 防抖写入同类型样式记忆，新拖入的同类材料沿用该尺寸
+    scheduleResizeSave(resizeIcon.value);
     return;
   }
 
@@ -347,6 +377,16 @@ function onCanvasMouseDown(e: MouseEvent, pageIndex: number) {
 }
 
 function onCanvasMouseUp() {
+  // 缩放结束时立即落盘，不等防抖
+  if (isResizing.value && resizeIcon.value) {
+    if (resizeSaveTimer) {
+      clearTimeout(resizeSaveTimer);
+      resizeSaveTimer = null;
+    }
+    const icon = resizeIcon.value;
+    const kind = iconMaterialKind(icon.option);
+    void bpStore.saveMaterialStyle(kind, { size: icon.size });
+  }
   isDragging.value = false;
   isResizing.value = false;
   isRotating.value = false;
@@ -354,11 +394,14 @@ function onCanvasMouseUp() {
   rotateIcon.value = null;
 }
 
-function onCanvasDblClick(e: MouseEvent, pageIndex: number) {
+// 右键单击 icon 时打开设置弹窗
+function onCanvasContextMenu(e: MouseEvent, pageIndex: number) {
   const coords = getCanvasCoordinates(e, pageIndex);
   const pageIcons = icons.value.filter(icon => icon.pageIndex === pageIndex);
   for (const icon of pageIcons) {
     if (isPointInIcon(coords, icon)) {
+      selectedIcon.value = icon;
+      redrawIcons(pageIndex);
       openLocationDialog(icon);
       return;
     }
@@ -369,6 +412,7 @@ function openLocationDialog(icon: StoreIcon) {
   indexOfPage.value = icon.pageIndex;
   pointer_x.value = icon.pointer.clientX;
   pointer_y.value = icon.pointer.clientY;
+  dialogIcon.value = icon;
   dialog.value = true;
 }
 
@@ -447,21 +491,38 @@ function getFieldValue(fieldName: string): string {
 }
 
 // 辅助函数：绘制字段文本
-function drawFieldText(ctx: CanvasRenderingContext2D, fieldName: string, fontFamily: string, fontSize: number, fontWeight: number, opacity: number, color: string, x: number, y: number): void {
+function drawFieldText(ctx: CanvasRenderingContext2D, fieldName: string, fontFamily: string, fontSize: number, fontWeight: number, italic: boolean, opacity: number, color: string, x: number, y: number): void {
   const fieldValue = getFieldValue(fieldName);
   ctx.globalAlpha = opacity;
   ctx.fillStyle = color;
-  ctx.font = `${fontWeight} ${fontSize}px "${fontFamily}"`;
+  ctx.font = `${italic ? 'italic ' : ''}${fontWeight} ${fontSize}px "${fontFamily}"`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillText(fieldValue, x, y);
   ctx.globalAlpha = 1;
 }
 
-// 辅助函数：绘制图片
-function drawImageIcon(ctx: CanvasRenderingContext2D, imgSrc: string, x: number, y: number, size: number, pageIndex: number): void {
+// 辅助函数：圆角矩形路径
+function roundedRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
+  const rr = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + rr, y);
+  ctx.lineTo(x + w - rr, y);
+  ctx.arcTo(x + w, y, x + w, y + rr, rr);
+  ctx.lineTo(x + w, y + h - rr);
+  ctx.arcTo(x + w, y + h, x + w - rr, y + h, rr);
+  ctx.lineTo(x + rr, y + h);
+  ctx.arcTo(x, y + h, x, y + h - rr, rr);
+  ctx.lineTo(x, y + rr);
+  ctx.arcTo(x, y, x + rr, y, rr);
+  ctx.closePath();
+}
+
+// 辅助函数：绘制图片（支持透明度 / 圆角 / 印章拉伸）
+function drawImageIcon(ctx: CanvasRenderingContext2D, icon: StoreIcon, x: number, y: number, size: number): void {
+  const imgSrc = icon.option.src || '';
   if (!imgSrc) return;
-  
+
   let img = imageCache.get(imgSrc);
   if (!img) {
     img = new Image();
@@ -469,15 +530,28 @@ function drawImageIcon(ctx: CanvasRenderingContext2D, imgSrc: string, x: number,
     imageCache.set(imgSrc, img);
     // 仅在首次加载完成时重绘该页（避免多个图片加载时重复重绘）
     img.onload = () => {
-      redrawIcons(pageIndex);
+      redrawIcons(icon.pageIndex);
     };
   }
-  
+
   if (img.complete && img.width && img.height) {
+    // 印章未锁定纵横比时拉伸填满正方形区域，其余保持原始比例
+    const stretch = icon.option.imageKind === 'seal' && icon.option.keepRatio === false;
     const imgRatio = img.width / img.height;
-    const drawWidth = imgRatio > 1 ? size : size * imgRatio;
-    const drawHeight = imgRatio > 1 ? size / imgRatio : size;
+    const drawWidth = stretch ? size : (imgRatio > 1 ? size : size * imgRatio);
+    const drawHeight = stretch ? size : (imgRatio > 1 ? size / imgRatio : size);
+
+    // 圆角：短边尺寸的百分比
+    const radius = ((icon.option.cornerRadius ?? 0) / 100) * Math.min(drawWidth, drawHeight);
+
+    ctx.save();
+    ctx.globalAlpha = icon.option.opacity ?? 1;
+    if (radius > 0) {
+      roundedRectPath(ctx, x - drawWidth / 2, y - drawHeight / 2, drawWidth, drawHeight, radius);
+      ctx.clip();
+    }
     ctx.drawImage(img, x - drawWidth / 2, y - drawHeight / 2, drawWidth, drawHeight);
+    ctx.restore();
   }
 }
 
@@ -611,6 +685,7 @@ function drawIcon(ctx: CanvasRenderingContext2D, icon: StoreIcon, isSelected: bo
       fontFamily,
       fontSize,
       icon.option.fontWeight ?? 400,
+      icon.option.italic ?? false,
       icon.option.opacity ?? 1,
       icon.option.color ?? '#000000',
       0, 0
@@ -620,13 +695,13 @@ function drawIcon(ctx: CanvasRenderingContext2D, icon: StoreIcon, isSelected: bo
     const fontSize = Math.max(8, Math.floor(size * 0.3));
     ctx.globalAlpha = icon.option.opacity ?? 1;
     ctx.fillStyle = icon.option.color ?? '#000000';
-    ctx.font = `${icon.option.fontWeight ?? 400} ${fontSize}px "${fontFamily}"`;
+    ctx.font = `${icon.option.italic ? 'italic ' : ''}${icon.option.fontWeight ?? 400} ${fontSize}px "${fontFamily}"`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(icon.option.text || '', 0, 0);
     ctx.globalAlpha = 1;
   } else if (icon.option.type === 'image') {
-    drawImageIcon(ctx, icon.option.src || '', 0, 0, size, icon.pageIndex);
+    drawImageIcon(ctx, icon, 0, 0, size);
   } else if (icon.option.type === 'icon') {
     const iconFontSize = Math.max(12, Math.floor(size * 0.8));
     ctx.globalAlpha = icon.option.opacity ?? 1;

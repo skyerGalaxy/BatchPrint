@@ -17,6 +17,7 @@ from pypdf import PdfReader, PdfWriter
 from reportlab.pdfgen import canvas
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.lib.utils import ImageReader
 
 app = FastAPI()
 
@@ -56,6 +57,8 @@ def register_custom_fonts():
             ("wingdng2.ttf", "Wingdings 2"),
             ("arial.ttf", "Arial"),
             ("arialbd.ttf", "Arial-Bold"),
+            ("ariali.ttf", "Arial-Italic"),
+            ("arialbi.ttf", "Arial-BoldItalic"),
         ]:
             full_path = windows_fonts_dir / font_path
             if full_path.exists() and font_name not in pdfmetrics.getRegisteredFontNames():
@@ -285,7 +288,7 @@ async def generate_batch_pdf(
         match_mode = icon_item.get("matchMode", "所有")
         return check_condition(row_data, conditions, match_mode)
     
-    def _apply_font_style(c, font_family, font_weight, font_size, color_hex, item_opacity):
+    def _apply_font_style(c, font_family, font_weight, font_size, color_hex, item_opacity, italic=False):
         def _safe_set_font(name, size):
             try:
                 c.setFont(name, size)
@@ -293,15 +296,35 @@ async def generate_batch_pdf(
             except:
                 return False
 
-        applied_font = None
-        if font_weight >= 600:
+        if italic:
+            if font_weight >= 600:
+                candidates = [
+                    font_family + "-BoldItalic", font_family + "-BoldOblique",
+                    font_family + "-Italic", font_family + "-Oblique",
+                    font_family + "-Bold", font_family, "微软雅黑",
+                ]
+            else:
+                candidates = [
+                    font_family + "-Italic", font_family + "-Oblique",
+                    font_family, "微软雅黑",
+                ]
+        elif font_weight >= 600:
             candidates = [font_family + "-Bold", font_family, "微软雅黑"]
         else:
             candidates = [font_family, "微软雅黑"]
+
+        applied_font = None
+        real_italic_font = False
         for name in candidates:
             if _safe_set_font(name, font_size):
                 applied_font = name
+                real_italic_font = italic and ("Italic" in name or "Oblique" in name)
                 break
+
+        # 无真斜体字体（如楷体等中文字体）时用水平错切合成斜体
+        if italic and not real_italic_font:
+            # PDF 坐标系 y 轴向上，字形顶部向右侧倾斜，错切矩阵 c 项取正（约 12°）
+            c.transform(1, 0, 0.21, 1, 0, 0)
 
         if item_opacity < 1.0:
             try:
@@ -328,9 +351,7 @@ async def generate_batch_pdf(
                 pass
         c.drawCentredString(x, y - offset, text)
 
-    def render_icon_to_overlay(overlay_pdf, icon_item, row_data: dict, page_rot: int, crop):
-        from reportlab.lib.utils import ImageReader
-
+    def render_icon_to_overlay(overlay_pdf, icon_item, row_data: dict, page_rot: int, crop, pdf_scale: float):
         mode = icon_item.get("mode")
         if mode not in ("single", "conditional"):
             return
@@ -338,11 +359,13 @@ async def generate_batch_pdf(
             return
 
         pointer = icon_item.get("pointer", {})
-        client_x = pointer.get("clientX", 0)
-        client_y = pointer.get("clientY", 0)
+        # 前端坐标与尺寸都基于 pdf_scale 缩放后的视口，统一除回 pdf_scale 得到 PDF 用户空间单位
         size = icon_item.get("size")
         if size is None:
             size = 40  # 与前端 getIconSize 默认值保持一致
+        unit = size / pdf_scale
+        client_x = pointer.get("clientX", 0) / pdf_scale
+        client_y = pointer.get("clientY", 0) / pdf_scale
         icon_rotation = icon_item.get("rotation") or 0
 
         crop_left, crop_bottom, crop_right, crop_top = crop
@@ -378,23 +401,25 @@ async def generate_batch_pdf(
                 field_name = option.get("fieldName")
                 font_family = option.get("fontFamily", "微软雅黑")
                 font_weight = option.get("fontWeight", 400)
+                font_italic = bool(option.get("italic", False))
                 item_color = option.get("color", "#000000")
                 item_opacity = option.get("opacity", 1.0)
-                font_size = max(8, math.floor(size * 0.3))
+                font_size = max(4, math.floor(unit * 0.3))
                 if field_name and field_name in row_data:
                     field_value = str(row_data[field_name])
-                    applied_font = _apply_font_style(overlay_pdf, font_family, font_weight, font_size, item_color, item_opacity)
+                    applied_font = _apply_font_style(overlay_pdf, font_family, font_weight, font_size, item_color, item_opacity, font_italic)
                     _draw_centred_text(overlay_pdf, 0, 0, field_value, applied_font, font_size)
 
             elif item_type == "text":
                 text_value = option.get("text", "")
                 font_family = option.get("fontFamily", "楷体")
                 font_weight = option.get("fontWeight", 400)
+                font_italic = bool(option.get("italic", False))
                 text_color = option.get("color", "#000000")
                 text_opacity = option.get("opacity", 1.0)
-                font_size = max(8, math.floor(size * 0.3))
+                font_size = max(4, math.floor(unit * 0.3))
                 if text_value:
-                    applied_font = _apply_font_style(overlay_pdf, font_family, font_weight, font_size, text_color, text_opacity)
+                    applied_font = _apply_font_style(overlay_pdf, font_family, font_weight, font_size, text_color, text_opacity, font_italic)
                     _draw_centred_text(overlay_pdf, 0, 0, text_value, applied_font, font_size)
 
             elif item_type == "image":
@@ -408,23 +433,61 @@ async def generate_batch_pdf(
 
                     if Path(local_path).exists():
                         try:
-                            img = Image.open(local_path)
+                            # 相同图片在多行之间只读取解码一次
+                            img = image_cache.get(local_path)
+                            if img is None:
+                                img = Image.open(local_path)
+                                img.load()
+                                image_cache[local_path] = img
                             img_width, img_height = img.size
                             img_ratio = img_width / img_height
-                            if img_ratio > 1:
-                                render_width = size
-                                render_height = size / img_ratio
-                            else:
-                                render_width = size * img_ratio
-                                render_height = size
 
-                            overlay_pdf.drawImage(
-                                ImageReader(local_path),
-                                -render_width / 2, -render_height / 2,
-                                width=render_width,
-                                height=render_height,
-                                mask='auto'
+                            # 印章关闭"锁定纵横比"时拉伸填满正方形区域，其余保持原始比例
+                            keep_ratio = option.get("keepRatio", True)
+                            stretch = option.get("imageKind") == "seal" and keep_ratio is False
+                            if stretch:
+                                render_width = unit
+                                render_height = unit
+                            elif img_ratio > 1:
+                                render_width = unit
+                                render_height = unit / img_ratio
+                            else:
+                                render_width = unit * img_ratio
+                                render_height = unit
+
+                            # 圆角：短边尺寸的百分比，与前端一致
+                            corner_radius = float(option.get("cornerRadius", 0) or 0)
+                            radius = min(
+                                corner_radius / 100.0 * min(render_width, render_height),
+                                render_width / 2,
+                                render_height / 2,
                             )
+                            img_opacity = float(option.get("opacity", 1.0) or 1.0)
+
+                            overlay_pdf.saveState()
+                            try:
+                                if radius > 0:
+                                    clip_path = overlay_pdf.beginPath()
+                                    clip_path.roundRect(
+                                        -render_width / 2, -render_height / 2,
+                                        render_width, render_height, radius,
+                                    )
+                                    overlay_pdf.clipPath(clip_path, stroke=0, fill=0)
+                                if img_opacity < 1.0:
+                                    overlay_pdf.setFillAlpha(img_opacity)
+                                image_reader = image_reader_cache.get(local_path)
+                                if image_reader is None:
+                                    image_reader = ImageReader(img)
+                                    image_reader_cache[local_path] = image_reader
+                                overlay_pdf.drawImage(
+                                    image_reader,
+                                    -render_width / 2, -render_height / 2,
+                                    width=render_width,
+                                    height=render_height,
+                                    mask='auto'
+                                )
+                            finally:
+                                overlay_pdf.restoreState()
                         except Exception as e:
                             print(f"图片渲染失败: {local_path}, {e}")
 
@@ -433,77 +496,155 @@ async def generate_batch_pdf(
                 if icon_char:
                     icon_color = option.get("color", "#000000")
                     icon_opacity = option.get("opacity", 1.0)
-                    icon_size = max(12, math.floor(size * 0.8))
+                    icon_size = max(6, math.floor(unit * 0.8))
                     applied_font = _apply_font_style(overlay_pdf, "Segoe UI Symbol", 400, icon_size, icon_color, icon_opacity)
                     _draw_centred_text(overlay_pdf, 0, 0, icon_char, applied_font, icon_size)
         finally:
             overlay_pdf.restoreState()
     
-    generated_files = []
-    used_names = {}
-    
-    for row_idx, row in enumerate(content):
-        row_data = {headers[i]: row[i] for i in range(len(headers))}
-        
-        row_writer = PdfWriter()
-        
-        for page_idx in range(pdf_page_count):
-            source_reader = PdfReader(io.BytesIO(pdf_content))
-            original_page = source_reader.pages[page_idx]
-            
-            scaled_width = original_page.mediabox.width * pdf_scale
-            scaled_height = original_page.mediabox.height * pdf_scale
-            
-            rotation = int(original_page.get('/Rotate', 0)) % 360
-            # pdf.js getViewport 基于 CropBox，先记录缩放后的裁剪框坐标
-            cb = original_page.cropbox
-            crop_box_scaled = (
-                float(cb.left) * pdf_scale,
-                float(cb.bottom) * pdf_scale,
-                float(cb.right) * pdf_scale,
-                float(cb.top) * pdf_scale,
-            )
-            
-            original_page.scale(pdf_scale, pdf_scale)
-            
-            icons_on_page = [icon for icon in icon_list_data if icon.get("pageIndex") == page_idx + 1]
-            
-            if icons_on_page:
-                overlay_buffer = io.BytesIO()
-                c = canvas.Canvas(overlay_buffer, pagesize=(scaled_width, scaled_height))
-                
-                for icon_item in icons_on_page:
-                    render_icon_to_overlay(c, icon_item, row_data, rotation, crop_box_scaled)
-                
+    image_cache: dict = {}
+    image_reader_cache: dict = {}
+
+    def sse_message(event_type: str, payload: dict) -> str:
+        return "data: " + json.dumps({"type": event_type, **payload}, ensure_ascii=False) + "\n\n"
+
+    def event_stream():
+        try:
+            total_rows = len(content)
+            yield sse_message("start", {"total": total_rows})
+
+            # ===== 预计算每页静态信息，并区分静态/动态图标 =====
+            # 静态：single 且非字段类（签字/印章/图标/文本），渲染结果与行数据无关
+            # 动态：字段类（值随行变化）或条件类（显隐随行变化），需逐行处理
+            pages_meta = []
+            for page_idx in range(pdf_page_count):
+                src_page = pdf_reader.pages[page_idx]
+                rotation = int(src_page.get('/Rotate', 0)) % 360
+                cb = src_page.cropbox
+                crop_box = (float(cb.left), float(cb.bottom), float(cb.right), float(cb.top))
+                page_size = (float(src_page.mediabox.width), float(src_page.mediabox.height))
+
+                page_icons = [ic for ic in icon_list_data if ic.get("pageIndex") == page_idx + 1]
+                static_icons = [
+                    ic for ic in page_icons
+                    if ic.get("mode") == "single" and ic.get("option", {}).get("type") != "field"
+                ]
+                static_ids = {id(ic) for ic in static_icons}
+                dynamic_icons = [ic for ic in page_icons if id(ic) not in static_ids]
+                pages_meta.append({
+                    "rotation": rotation,
+                    "crop": crop_box,
+                    "size": page_size,
+                    "static": static_icons,
+                    "dynamic": dynamic_icons,
+                })
+
+            def make_overlay_page(meta, icons):
+                buf = io.BytesIO()
+                c = canvas.Canvas(buf, pagesize=meta["size"])
+                for icon_item in icons:
+                    render_icon_to_overlay(
+                        c, icon_item, {}, meta["rotation"], meta["crop"], pdf_scale
+                    )
                 c.save()
-                overlay_buffer.seek(0)
-                
-                overlay_reader = PdfReader(overlay_buffer)
-                overlay_page = overlay_reader.pages[0]
-                
-                from pypdf.generic import RectangleObject as Rect
-                saved_mb = original_page.mediabox
-                original_page.mediabox = Rect((0, 0, scaled_width, scaled_height))
-                original_page.merge_page(overlay_page)
-                original_page.mediabox = saved_mb
-            
-            original_page.scale(1/pdf_scale, 1/pdf_scale)
-            row_writer.add_page(original_page)
-        
-        base_name = build_filename(row_data, row_idx)
-        if base_name in used_names:
-            used_names[base_name] += 1
-            base_name = f"{base_name}({used_names[base_name]})"
-        else:
-            used_names[base_name] = 0
-        output_filename = f"{base_name}.pdf"
-        output_path = target_dir / output_filename
-        with open(output_path, "wb") as f:
-            row_writer.write(f)
-        
-        generated_files.append(str(output_path))
-    
-    return {"msg": "PDF 已保存", "path": str(target_dir), "files": generated_files}
+                buf.seek(0)
+                return PdfReader(buf).pages[0]
+
+            # ===== 1) 静态图标只渲染/合并一次，生成基础 PDF =====
+            if any(m["static"] for m in pages_meta):
+                base_writer = PdfWriter()
+                base_writer.append(pdf_reader, import_outline=False)
+                for page_idx, meta in enumerate(pages_meta):
+                    if meta["static"]:
+                        base_writer.pages[page_idx].merge_page(make_overlay_page(meta, meta["static"]))
+                base_buf = io.BytesIO()
+                base_writer.write(base_buf)
+                base_buf.seek(0)
+                base_reader = PdfReader(base_buf)
+            else:
+                base_reader = pdf_reader
+
+            generated_files = []
+            used_names = {}
+            # 动态覆盖层按 (页, 可见集合+字段值) 签名缓存，内容相同的行直接复用
+            overlay_cache: dict = {}
+
+            # ===== 2) 逐行克隆基础 PDF，仅处理动态图标 =====
+            for row_idx, row in enumerate(content):
+                row_data = {headers[i]: row[i] for i in range(len(headers))}
+
+                row_writer = PdfWriter()
+                row_writer.append(base_reader, import_outline=False)
+
+                for page_idx, meta in enumerate(pages_meta):
+                    dynamic = meta["dynamic"]
+                    if not dynamic:
+                        continue
+
+                    # 条件图标先评估显隐；single 字段图标始终显示
+                    visible = [
+                        ic for ic in dynamic
+                        if ic.get("mode") != "conditional" or evaluate_icon_conditions(row_data, ic)
+                    ]
+                    if not visible:
+                        continue
+
+                    # 签名同时包含字段类图标的当前值（字段值随行变化）
+                    sig = frozenset(
+                        (
+                            id(ic),
+                            str(row_data.get(ic.get("option", {}).get("fieldName"), ""))
+                            if ic.get("option", {}).get("type") == "field" else None,
+                        )
+                        for ic in visible
+                    )
+                    cache_key = (page_idx, sig)
+                    overlay_page = overlay_cache.get(cache_key)
+                    if overlay_page is None:
+                        # 强制按 single 绘制（显隐已在外部判定），避免重复评估条件
+                        forced = [{**ic, "mode": "single"} for ic in visible]
+                        buf = io.BytesIO()
+                        c = canvas.Canvas(buf, pagesize=meta["size"])
+                        for icon_item in forced:
+                            render_icon_to_overlay(
+                                c, icon_item, row_data, meta["rotation"], meta["crop"], pdf_scale
+                            )
+                        c.save()
+                        buf.seek(0)
+                        overlay_page = PdfReader(buf).pages[0]
+                        overlay_cache[cache_key] = overlay_page
+
+                    row_writer.pages[page_idx].merge_page(overlay_page)
+
+                base_name = build_filename(row_data, row_idx)
+                if base_name in used_names:
+                    used_names[base_name] += 1
+                    base_name = f"{base_name}({used_names[base_name]})"
+                else:
+                    used_names[base_name] = 0
+                output_path = target_dir / f"{base_name}.pdf"
+                with open(output_path, "wb") as f:
+                    row_writer.write(f)
+
+                generated_files.append(str(output_path))
+                yield sse_message("progress", {
+                    "current": row_idx + 1,
+                    "total": total_rows,
+                })
+
+            yield sse_message("done", {
+                "msg": "PDF 已保存",
+                "path": str(target_dir),
+                "files": generated_files,
+            })
+        except Exception as error:
+            yield sse_message("error", {"message": f"生成失败: {error}"})
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 if __name__ == "__main__":

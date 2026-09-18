@@ -91,37 +91,49 @@
 
                   <!-- 签字：设置路径下的签字内容 -->
                   <template v-else-if="activeMaterialNav === 'signature'">
-                    <div v-if="bpStore.imageList_signature.length === 0" class="expand-empty-tip">
-                      设置路径下暂无签字图片
-                    </div>
-                    <div v-else class="thumb-grid">
+                    <div class="thumb-grid">
                       <div
                         v-for="(img, idx) in bpStore.imageList_signature"
                         :key="idx"
                         class="thumb-card thumb-card--signature"
                         draggable="true"
                         @dragstart="startImageDrag($event, 'signature', idx)"
+                        @contextmenu.prevent="onImageContextMenu($event, 'signature', idx)"
                       >
                         <img :src="img" />
                       </div>
+                      <button
+                        type="button"
+                        class="thumb-card thumb-add thumb-add--signature"
+                        title="添加签字图片"
+                        @click="triggerImagePicker('signature')"
+                      >
+                        <v-icon size="28">mdi-plus</v-icon>
+                      </button>
                     </div>
                   </template>
 
                   <!-- 印章：设置路径下的印章内容 -->
                   <template v-else-if="activeMaterialNav === 'seal'">
-                    <div v-if="bpStore.imageList_seal.length === 0" class="expand-empty-tip">
-                      设置路径下暂无印章图片
-                    </div>
-                    <div v-else class="thumb-grid">
+                    <div class="thumb-grid">
                       <div
                         v-for="(img, idx) in bpStore.imageList_seal"
                         :key="idx"
                         class="thumb-card thumb-card--seal"
                         draggable="true"
                         @dragstart="startImageDrag($event, 'seal', idx)"
+                        @contextmenu.prevent="onImageContextMenu($event, 'seal', idx)"
                       >
                         <img :src="img" />
                       </div>
+                      <button
+                        type="button"
+                        class="thumb-card thumb-add thumb-add--seal"
+                        title="添加印章图片"
+                        @click="triggerImagePicker('seal')"
+                      >
+                        <v-icon size="28">mdi-plus</v-icon>
+                      </button>
                     </div>
                   </template>
 
@@ -152,31 +164,26 @@
 
                   <!-- 文本：预设文本 chips，+ chip 打开文本窗口添加自定义文字 -->
                   <template v-else-if="activeMaterialNav === 'text'">
-                    <div class="text-stage">
-                      <div v-if="textPresets.length === 0" class="expand-empty-tip">
-                        暂无文本预设，点击下方「+ 添加文本」创建自定义文字
-                      </div>
-                      <div v-else class="text-preset-list">
-                        <div
-                          v-for="preset in textPresets"
-                          :key="preset.id"
-                          class="text-preset-chip"
-                          :title="`拖动「${preset.text}」到 PDF`"
-                          draggable="true"
-                          @dragstart="startPresetTextDrag($event, preset)"
+                    <div class="text-preset-list">
+                      <div
+                        v-for="preset in textPresets"
+                        :key="preset.id"
+                        class="text-preset-chip"
+                        :title="`拖动「${preset.text}」到 PDF`"
+                        draggable="true"
+                        @dragstart="startPresetTextDrag($event, preset)"
+                      >
+                        <span class="text-preset-label" :style="presetPreviewStyle(preset)">
+                          {{ preset.text }}
+                        </span>
+                        <button
+                          type="button"
+                          class="text-preset-del"
+                          title="删除预设"
+                          @click.stop="deleteTextPreset(preset.id)"
                         >
-                          <span class="text-preset-label" :style="presetPreviewStyle(preset)">
-                            {{ preset.text }}
-                          </span>
-                          <button
-                            type="button"
-                            class="text-preset-del"
-                            title="删除预设"
-                            @click.stop="deleteTextPreset(preset.id)"
-                          >
-                            <v-icon size="12">mdi-close</v-icon>
-                          </button>
-                        </div>
+                          <v-icon size="12">mdi-close</v-icon>
+                        </button>
                       </div>
                       <button type="button" class="text-preset-add" @click="openTextDialog">
                         <v-icon size="16">mdi-plus</v-icon>
@@ -366,13 +373,27 @@
               rounded="lg"
               block
               class="generate-btn"
-              :loading="generating"
               :disabled="generating"
               @click="generateBatchPDF"
             >
               <v-icon size="18" class="mr-2">mdi-file-document-multiple</v-icon>
-              {{ generating ? '生成中...' : '生成 PDF' }}
+              {{ generating ? `生成中 ${generateCurrent}/${generateTotal}` : '生成 PDF' }}
             </v-btn>
+
+            <div v-if="generating" class="generate-progress">
+              <v-progress-linear
+                :model-value="generateProgress"
+                color="primary"
+                height="8"
+                rounded
+                striped
+                stream
+              />
+              <div class="generate-progress-text">
+                <span>正在生成 PDF…</span>
+                <span>{{ generateCurrent }} / {{ generateTotal }}（{{ Math.round(generateProgress) }}%）</span>
+              </div>
+            </div>
           </div>
         </div>
       </v-col>
@@ -592,6 +613,34 @@
         </v-card-actions>
       </v-card>
     </v-dialog>
+
+    <!-- 签字 / 印章图片添加：隐藏文件选择器 -->
+    <input
+      ref="imageFileInput"
+      type="file"
+      accept="image/*"
+      class="hidden-file-input"
+      @change="handleImageSelect"
+    />
+
+    <!-- 签字 / 印章图片右键删除菜单 -->
+    <div
+      v-if="imageContextMenu.show"
+      class="img-ctx-menu"
+      :style="{ left: imageContextMenu.x + 'px', top: imageContextMenu.y + 'px' }"
+      @click.stop
+    >
+      <button type="button" class="img-ctx-item" @click="deleteImage">
+        <v-icon size="16" color="error">mdi-delete-outline</v-icon>
+        <span>删除图片</span>
+      </button>
+    </div>
+    <div
+      v-if="imageContextMenu.show"
+      class="img-ctx-backdrop"
+      @click="closeImageContextMenu"
+      @contextmenu.prevent="closeImageContextMenu"
+    ></div>
   </v-container>
 </template>
 
@@ -599,7 +648,7 @@
 import axios from 'axios'
 import { ref, computed, onMounted, watch } from 'vue'
 import { invoke, convertFileSrc } from '@tauri-apps/api/core'
-import { readDir, exists } from '@tauri-apps/plugin-fs'
+import { readDir, exists, writeFile, mkdir, remove } from '@tauri-apps/plugin-fs'
 import { Store } from '@tauri-apps/plugin-store'
 import PdfViewer from '@/components/pdfview/PdfViewer.vue'
 import { useBPStore } from '@/stores/bpstore'
@@ -687,7 +736,7 @@ const iconGroups = [
 function startImageDrag(event: DragEvent, type: 'signature' | 'seal', index: number) {
   if (!event.dataTransfer) return
   const list = type === 'signature' ? bpStore.imageList_signature : bpStore.imageList_seal
-  const option: IconOption = { type: 'image', src: list[index] ?? '', size: 120 }
+  const option: IconOption = { type: 'image', imageKind: type, src: list[index] ?? '', size: 120 }
   event.dataTransfer.effectAllowed = 'copy'
   event.dataTransfer.setData('application/x-batchprint-option', JSON.stringify({ option, panel: type }))
 }
@@ -857,12 +906,93 @@ async function refreshImageLists() {
   bpStore.imageList_seal = seal
 }
 
+/* ========= 添加签字 / 印章图片 ========= */
+const imagePickerKind = ref<'signature' | 'seal'>('signature')
+const imageFileInput = ref<HTMLInputElement | null>(null)
+
+function triggerImagePicker(kind: 'signature' | 'seal') {
+  if (!bpStore.dataPath) return
+  imagePickerKind.value = kind
+  imageFileInput.value?.click()
+}
+
+async function handleImageSelect(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  const kind = imagePickerKind.value
+  const subDir = kind === 'signature' ? 'signImg' : 'sealImg'
+  const dirPath = `${bpStore.dataPath}/${subDir}`
+  try {
+    if (!await exists(dirPath)) {
+      await mkdir(dirPath, { recursive: true })
+    }
+    const buf = await file.arrayBuffer()
+    await writeFile(`${dirPath}/${file.name}`, new Uint8Array(buf))
+    await refreshImageLists()
+  } catch (error) {
+    console.error('添加图片失败:', error)
+    alert('添加图片失败，请检查路径权限')
+  } finally {
+    input.value = ''
+  }
+}
+
+/* ========= 右键删除签字 / 印章图片 ========= */
+const imageContextMenu = ref({
+  show: false,
+  x: 0,
+  y: 0,
+  kind: 'signature' as 'signature' | 'seal',
+  index: -1,
+})
+
+function onImageContextMenu(event: MouseEvent, kind: 'signature' | 'seal', index: number) {
+  event.preventDefault()
+  imageContextMenu.value = {
+    show: true,
+    x: event.clientX,
+    y: event.clientY,
+    kind,
+    index,
+  }
+}
+
+function closeImageContextMenu() {
+  imageContextMenu.value.show = false
+}
+
+async function deleteImage() {
+  const { kind, index } = imageContextMenu.value
+  closeImageContextMenu()
+  if (index < 0 || !bpStore.dataPath) return
+  const list = kind === 'signature' ? bpStore.imageList_signature : bpStore.imageList_seal
+  const src = list[index]
+  if (!src) return
+  const subDir = kind === 'signature' ? 'signImg' : 'sealImg'
+  // convertFileSrc 生成 URL 时会编码路径，先整体解码再取最后一段文件名
+  const decoded = decodeURIComponent(src)
+  const fileName = decoded.split(/[/\\]/).pop() || ''
+  if (!fileName) return
+  const filePath = `${bpStore.dataPath}/${subDir}/${fileName}`
+  try {
+    await remove(filePath)
+    await refreshImageLists()
+  } catch (error) {
+    console.error('删除图片失败:', error)
+    alert('删除图片失败，请检查文件是否被占用')
+  }
+}
+
 const mergedCellsDialog = ref(false)
 const excelErrorDialog = ref(false)
 const excelErrorMessage = ref('')
 const resetKey = ref(0)
 
 const generating = ref(false)
+const generateProgress = ref(0)
+const generateCurrent = ref(0)
+const generateTotal = ref(0)
 const resultDialog = ref(false)
 const resultSuccess = ref(false)
 const resultMessage = ref('')
@@ -1035,6 +1165,7 @@ onMounted(async () => {
     loadFonts(),
     loadTextPresets(),
     refreshImageLists(),
+    bpStore.loadMaterialStyles(),
   ])
 })
 
@@ -1128,6 +1259,9 @@ const generateBatchPDF = async () => {
   }
 
   generating.value = true
+  generateProgress.value = 0
+  generateCurrent.value = 0
+  generateTotal.value = 0
 
   try {
     const formData = new FormData()
@@ -1142,16 +1276,54 @@ const generateBatchPDF = async () => {
       JSON.stringify({ parts: nameParts.value, separator: '' })
     )
 
-    const res = await apiPost('http://localhost:8000/generate_batch_pdf', formData)
+    // 后端通过 SSE 逐行上报进度
+    const resp = await fetch('http://localhost:8000/generate_batch_pdf', {
+      method: 'POST',
+      body: formData,
+    })
+    if (!resp.ok || !resp.body) {
+      throw new Error(`后端响应异常: HTTP ${resp.status}`)
+    }
+
+    const reader = resp.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let donePayload: { msg?: string; path?: string } | null = null
+
+    while (true) {
+      const { value, done } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const chunks = buffer.split('\n\n')
+      buffer = chunks.pop() || ''
+      for (const chunk of chunks) {
+        const line = chunk.trim()
+        if (!line.startsWith('data:')) continue
+        const evt = JSON.parse(line.slice(5).trim())
+        if (evt.type === 'start') {
+          generateTotal.value = evt.total || 0
+        } else if (evt.type === 'progress') {
+          generateCurrent.value = evt.current
+          generateTotal.value = evt.total
+          generateProgress.value = evt.total ? (evt.current / evt.total) * 100 : 0
+        } else if (evt.type === 'done') {
+          donePayload = evt
+        } else if (evt.type === 'error') {
+          throw new Error(evt.message || '生成失败')
+        }
+      }
+    }
+
+    if (!donePayload) throw new Error('未收到后端完成事件')
 
     resultSuccess.value = true
-    resultMessage.value = res.data.msg || 'PDF批量生成成功！'
-    resultPath.value = res.data.path || ''
+    resultMessage.value = donePayload.msg || 'PDF批量生成成功！'
+    resultPath.value = donePayload.path || ''
     resultDialog.value = true
   } catch (error) {
     console.error('生成PDF失败:', error)
     resultSuccess.value = false
-    resultMessage.value = 'PDF批量生成出错，请查看浏览器控制台'
+    resultMessage.value = (error as Error)?.message || 'PDF批量生成出错，请查看浏览器控制台'
     resultPath.value = ''
     resultDialog.value = true
   } finally {
@@ -1409,6 +1581,7 @@ const handleReset = () => {
 .thumb-grid {
   flex: 1;
   min-height: 0;
+  height: 0;
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 6px;
@@ -1451,6 +1624,46 @@ const handleReset = () => {
 .thumb-card:active {
   cursor: grabbing;
   transform: translateY(0);
+}
+
+/* ---- signature / seal add card ---- */
+.thumb-add {
+  cursor: pointer;
+  opacity: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed rgba(100, 116, 139, 0.4);
+  background: rgba(100, 116, 139, 0.06);
+  color: rgba(100, 116, 139, 0.7);
+  font: inherit;
+}
+
+.thumb-add:hover {
+  border-style: solid;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.thumb-add:active {
+  cursor: pointer;
+  transform: translateY(0);
+}
+
+.thumb-add--signature {
+  border-color: rgba(15, 118, 110, 0.45);
+  background: rgba(15, 118, 110, 0.05);
+  color: rgba(15, 118, 110, 0.8);
+}
+
+.thumb-add--seal {
+  border-color: rgba(194, 65, 12, 0.45);
+  background: rgba(194, 65, 12, 0.05);
+  color: rgba(194, 65, 12, 0.8);
+}
+
+.hidden-file-input {
+  display: none;
 }
 
 /* ---- icon mini grid ---- */
@@ -1842,6 +2055,19 @@ const handleReset = () => {
   border-radius: 12px !important;
 }
 
+.generate-progress {
+  margin-top: 10px;
+}
+
+.generate-progress-text {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  font-size: 12px;
+  color: #64748b;
+  font-variant-numeric: tabular-nums;
+}
+
 /* ---- preview ---- */
 .preview-surface {
   /* 把预览区限制成可收缩的 flex 子项，确保内部滚动不会推动外层布局 */
@@ -1874,5 +2100,56 @@ const handleReset = () => {
   padding: 2px 6px;
   border-radius: 4px;
   word-break: break-all;
+}
+
+/* ---- 右键删除菜单 ---- */
+.img-ctx-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1999;
+}
+
+.img-ctx-menu {
+  position: fixed;
+  z-index: 2000;
+  min-width: 140px;
+  padding: 4px;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  animation: img-ctx-fade 0.1s ease;
+}
+
+@keyframes img-ctx-fade {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.img-ctx-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #ef4444;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.img-ctx-item:hover {
+  background: rgba(239, 68, 68, 0.08);
 }
 </style>

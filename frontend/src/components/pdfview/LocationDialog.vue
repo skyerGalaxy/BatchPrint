@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { ref, watch } from "vue";
 import { useBPStore } from "@/stores/bpstore";
-import MaterialPanel from "./MaterialPanel.vue";
+import MaterialSettings, { type MaterialKind } from "./MaterialSettings.vue";
 import type { Condition, ConditionGroup, IconOption, LogicType, MatchMode, StoreIcon } from "@/types/icon";
-
 const props = defineProps({
   dialog: {
     type: Boolean,
@@ -17,51 +16,46 @@ const props = defineProps({
     type: Object as () => { clientX: number; clientY: number },
     required: true
   },
+  /** 右键空白新增时的材料类型 */
   initialPanel: {
-    type: String,
+    type: String as () => MaterialKind,
     default: 'table'
   },
-  initialOption: {
-    type: Object as () => IconOption | null,
-    default: null
-  },
-  initialField: {
-    type: String,
+  /** 双击已有材料编辑时传入 */
+  initialIcon: {
+    type: Object as () => StoreIcon | null,
     default: null
   }
 });
 
 const emits = defineEmits(['update:dialog']);
 
-const tab = ref('1');
-const step = ref(1);
-
 const bpStore = useBPStore();
 
-const selectedOption = ref<IconOption | null>(props.initialOption);
+type DialogTab = 'single' | 'conditional';
+const tab = ref<DialogTab>('single');
+const step = ref(1);
 
-watch(() => props.initialOption, (option) => {
-  selectedOption.value = option;
-});
+/** 当前材料类型 */
+const kind = ref<MaterialKind>('table');
+/** 当前编辑的选项（常规与条件第二步共享同一份） */
+const currentOption = ref<IconOption>({} as IconOption);
+/** 编辑已有项时的 id；新增为 null */
+const editId = ref<number | null>(null);
 
 const ops = ['等于', '不等于', '包含', '不包含', '为空', '不为空'];
 
 const logicType = ref<LogicType>('simple');
-
 const matchMode = ref<MatchMode>('所有');
 const conditions = ref<Condition[]>([
   { id: Date.now(), field: null, op: '等于', value: '' }
 ]);
-
 const groups = ref<ConditionGroup[]>([
   { id: Date.now(), matchMode: '所有', conditions: [{ id: Date.now() + 1, field: null, op: '等于', value: '' }] }
 ]);
 const groupConnectors = ref<MatchMode[]>([]);
 
-const iconId = ref<number>(1);
-
 let nextId = Date.now();
-
 function genId(): number {
   return ++nextId;
 }
@@ -69,6 +63,123 @@ function genId(): number {
 const snackbar = ref(false);
 const snackbarMsg = ref('');
 
+const KIND_TITLES: Record<MaterialKind, string> = {
+  table: '表格字段',
+  signature: '签字',
+  seal: '印章',
+  icon: '图标',
+  text: '文本',
+};
+
+/* ========= 默认选项 ========= */
+/** 各类材料需要记忆的样式字段（排除 fieldName/src/icon/text 等标识字段） */
+const STYLE_KEYS: Record<MaterialKind, (keyof IconOption)[]> = {
+  table: ['fontFamily', 'fontWeight', 'italic', 'color', 'opacity', 'size'],
+  signature: ['size', 'cornerRadius', 'opacity'],
+  seal: ['size', 'cornerRadius', 'opacity', 'keepRatio'],
+  icon: ['size', 'color', 'opacity'],
+  text: ['fontFamily', 'fontWeight', 'italic', 'color', 'opacity', 'size'],
+};
+
+function extractStyle(k: MaterialKind, o: IconOption): Partial<IconOption> {
+  const style: Partial<IconOption> = {};
+  for (const key of STYLE_KEYS[k]) {
+    const v = o[key];
+    if (v !== undefined && v !== null) (style as Record<string, unknown>)[key] = v;
+  }
+  return style;
+}
+
+function createDefaultOption(k: MaterialKind): IconOption {
+  const firstField = bpStore.fieldNames[0] ?? '';
+  const firstSignature = bpStore.imageList_signature[0] ?? '';
+  const firstSeal = bpStore.imageList_seal[0] ?? '';
+  let base: IconOption;
+  switch (k) {
+    case 'signature':
+      base = { type: 'image', imageKind: 'signature', src: firstSignature, size: 120, cornerRadius: 0, opacity: 1 };
+      break;
+    case 'seal':
+      base = { type: 'image', imageKind: 'seal', src: firstSeal, size: 120, cornerRadius: 0, opacity: 1, keepRatio: true };
+      break;
+    case 'icon':
+      base = { type: 'icon', icon: '✓', color: '#000000', opacity: 1, size: 120 };
+      break;
+    case 'text':
+      base = { type: 'text', text: '自定义文本', fontFamily: '楷体', fontWeight: 400, italic: false, color: '#000000', opacity: 1, size: 120 };
+      break;
+    case 'table':
+    default:
+      base = { type: 'field', fieldName: firstField, fontFamily: '楷体', fontWeight: 400, italic: false, color: '#000000', opacity: 1, size: 120 };
+      break;
+  }
+  // 同类型材料沿用上次确认的样式，标识字段仍取当前默认
+  return bpStore.instantiateOption(k, base);
+}
+
+function kindForIcon(icon: StoreIcon): MaterialKind {
+  const t = icon.option?.type;
+  if (t === 'field') return 'table';
+  if (t === 'icon') return 'icon';
+  if (t === 'text') return 'text';
+  if (t === 'image') {
+    if (icon.option.imageKind) return icon.option.imageKind;
+    // 兼容旧数据：按 src 出现在哪个列表推导
+    const src = icon.option.src ?? '';
+    if (src && bpStore.imageList_signature.includes(src)) return 'signature';
+    return 'seal';
+  }
+  return 'table';
+}
+
+/* ========= 初始化 / 重置 ========= */
+function freshConditions(): Condition[] {
+  return [{ id: genId(), field: null, op: '等于', value: '' }];
+}
+
+function initDialog() {
+  const editing = props.initialIcon;
+  step.value = 1;
+  nextId = Date.now();
+
+  if (editing) {
+    editId.value = editing.id;
+    kind.value = kindForIcon(editing);
+    currentOption.value = JSON.parse(JSON.stringify(editing.option ?? {}));
+    tab.value = editing.mode === 'conditional' ? 'conditional' : 'single';
+    logicType.value = editing.logicType ?? 'simple';
+    matchMode.value = editing.matchMode ?? '所有';
+    conditions.value = editing.conditions?.length
+      ? JSON.parse(JSON.stringify(editing.conditions))
+      : freshConditions();
+    groups.value = editing.groups?.length
+      ? JSON.parse(JSON.stringify(editing.groups))
+      : [{ id: genId(), matchMode: '所有', conditions: freshConditions() }];
+    groupConnectors.value = editing.groupConnectors?.length
+      ? JSON.parse(JSON.stringify(editing.groupConnectors))
+      : [];
+  } else {
+    editId.value = null;
+    kind.value = props.initialPanel;
+    currentOption.value = createDefaultOption(props.initialPanel);
+    tab.value = 'single';
+    logicType.value = 'simple';
+    matchMode.value = '所有';
+    conditions.value = freshConditions();
+    groups.value = [{ id: genId(), matchMode: '所有', conditions: freshConditions() }];
+    groupConnectors.value = [];
+  }
+}
+
+watch(() => props.dialog, (open) => {
+  if (open) initDialog();
+});
+
+watch(tab, () => {
+  step.value = 1;
+});
+
+/* ========= 条件校验（沿用原逻辑） ========= */
 function isConditionValid(cond: Condition): boolean {
   if (!cond.field) return false;
   if (cond.op !== '为空' && cond.op !== '不为空' && !cond.value.trim()) return false;
@@ -113,12 +224,7 @@ function validateAllAdvanced(): boolean {
 
 function addCondition() {
   if (!validateBeforeAdd(conditions.value)) return;
-  conditions.value.push({
-    id: genId(),
-    field: null,
-    op: '等于',
-    value: ''
-  });
+  conditions.value.push({ id: genId(), field: null, op: '等于', value: '' });
 }
 
 function removeCondition(index: number) {
@@ -145,12 +251,7 @@ function removeGroup(index: number) {
 
 function addGroupCondition(groupIndex: number) {
   if (!validateBeforeAdd(groups.value[groupIndex].conditions)) return;
-  groups.value[groupIndex].conditions.push({
-    id: genId(),
-    field: null,
-    op: '等于',
-    value: ''
-  });
+  groups.value[groupIndex].conditions.push({ id: genId(), field: null, op: '等于', value: '' });
 }
 
 function removeGroupCondition(groupIndex: number, condIndex: number) {
@@ -163,111 +264,99 @@ function goNext() {
   step.value++;
 }
 
-function fieldUsedInSimple(): string[] {
-  return conditions.value
-    .filter(c => c.field !== null)
-    .map(c => c.field!);
+/* ========= 材料设置校验 ========= */
+function validateOption(): boolean {
+  const o = currentOption.value;
+  if (kind.value === 'table' && !o.fieldName) {
+    snackbarMsg.value = '请选择 Excel 字段';
+    snackbar.value = true;
+    return false;
+  }
+  if ((kind.value === 'signature' || kind.value === 'seal') && !o.src) {
+    snackbarMsg.value = `请选择${KIND_TITLES[kind.value]}图片`;
+    snackbar.value = true;
+    return false;
+  }
+  if (kind.value === 'text' && !o.text?.trim()) {
+    snackbarMsg.value = '请输入文本内容';
+    snackbar.value = true;
+    return false;
+  }
+  if (kind.value === 'icon' && !o.icon) {
+    snackbarMsg.value = '请选择图标';
+    snackbar.value = true;
+    return false;
+  }
+  return true;
 }
 
-function fieldUsedInGroup(groupIndex: number): string[] {
-  return groups.value[groupIndex].conditions
-    .filter(c => c.field !== null)
-    .map(c => c.field!);
+function validateConditional(): boolean {
+  if (logicType.value === 'simple') {
+    if (conditions.value.filter(c => isConditionValid(c)).length < 1) {
+      snackbarMsg.value = '请至少添加一个完整条件';
+      snackbar.value = true;
+      return false;
+    }
+  } else {
+    const hasAny = groups.value.some(g => g.conditions.some(c => isConditionValid(c)));
+    if (!hasAny) {
+      snackbarMsg.value = '请至少添加一个完整条件';
+      snackbar.value = true;
+      return false;
+    }
+  }
+  return true;
 }
 
-function fieldsForSimple(): string[] {
-  const used = fieldUsedInSimple();
-  return bpStore.fieldNames.filter(f => !used.includes(f));
-}
+/* ========= 确认 ========= */
+function buildIcon(id: number): StoreIcon {
+  const option = JSON.parse(JSON.stringify(currentOption.value)) as IconOption;
+  const result: StoreIcon = {
+    id,
+    pageIndex: props.pageIndex,
+    pointer: props.pointer,
+    mode: tab.value === 'conditional' ? 'conditional' : 'single',
+    option,
+    size: option.size ?? 120,
+    scale: bpStore.pdfScale,
+  };
 
-function fieldsForGroup(groupIndex: number): string[] {
-  const used = fieldUsedInGroup(groupIndex);
-  return bpStore.fieldNames.filter(f => !used.includes(f));
+  if (result.mode === 'conditional') {
+    result.logicType = logicType.value;
+    if (logicType.value === 'simple') {
+      result.conditions = JSON.parse(JSON.stringify(conditions.value));
+      result.matchMode = matchMode.value;
+    } else {
+      result.groups = JSON.parse(JSON.stringify(groups.value));
+      result.groupConnectors = JSON.parse(JSON.stringify(groupConnectors.value));
+    }
+  }
+  return result;
 }
 
 function handleConfirm() {
-  let result: StoreIcon;
+  if (!validateOption()) return;
+  if (tab.value === 'conditional' && !validateConditional()) return;
 
-  if (tab.value === '1') {
-    result = {
-      id: iconId.value,
-      pageIndex: props.pageIndex,
-      pointer: props.pointer,
-      mode: 'single',
-      option: selectedOption.value!,
-      size: (selectedOption.value as any)?.size,
-      scale: bpStore.pdfScale
-    };
+  // 记忆本类型材料的样式，后续新拖入/新建的同类材料沿用，直到再次变更
+  bpStore.saveMaterialStyle(kind.value, extractStyle(kind.value, currentOption.value));
+
+  if (editId.value !== null) {
+    // 编辑已有项：保留 id/位置/旋转，更新其余字段
+    const idx = bpStore.iconList.findIndex(i => i.id === editId.value);
+    if (idx >= 0) {
+      const old = bpStore.iconList[idx] as StoreIcon;
+      const rotation = old.rotation;
+      const built = buildIcon(editId.value);
+      built.rotation = rotation;
+      bpStore.iconList.splice(idx, 1, built);
+    }
   } else {
-    result = {
-      id: iconId.value,
-      pageIndex: props.pageIndex,
-      pointer: props.pointer,
-      mode: 'conditional',
-      option: selectedOption.value!,
-      size: (selectedOption.value as any)?.size,
-      scale: bpStore.pdfScale,
-      logicType: logicType.value,
-    };
-
-    if (logicType.value === 'simple') {
-      result.conditions = conditions.value;
-      result.matchMode = matchMode.value;
-    } else {
-      result.groups = groups.value;
-      result.groupConnectors = groupConnectors.value;
-    }
+    const maxId = bpStore.iconList.reduce((max, i) => Math.max(max, i.id), 0);
+    bpStore.iconList.push(buildIcon(maxId + 1));
   }
-
-  if (!result.option) {
-    snackbarMsg.value = '请至少选择一个选项';
-    snackbar.value = true;
-    return;
-  }
-
-  if (result.mode === 'conditional') {
-    if (logicType.value === 'simple' && result.conditions) {
-      const valid = result.conditions.filter(c => isConditionValid(c));
-      if (valid.length < 1) {
-        snackbarMsg.value = '请至少添加一个条件';
-        snackbar.value = true;
-        return;
-      }
-    }
-    if (logicType.value === 'advanced' && result.groups) {
-      const hasAnyCondition = result.groups.some(g =>
-        g.conditions.filter(c => isConditionValid(c)).length > 0
-      );
-      if (!hasAnyCondition) {
-        snackbarMsg.value = '请至少添加一个条件';
-        snackbar.value = true;
-        return;
-      }
-    }
-  }
-
-  bpStore.iconList.push(result);
-  if (bpStore.iconList.length === iconId.value) {
-    iconId.value++;
-  }
-
-  resetDialog();
 
   emits('update:dialog', false);
-}
-
-function resetDialog() {
-  tab.value = '1';
-  step.value = 1;
-  selectedOption.value = null;
-  logicType.value = 'simple';
-  matchMode.value = '所有';
-  nextId = Date.now();
-  conditions.value = [{ id: genId(), field: null, op: '等于', value: '' }];
-  groups.value = [
-    { id: genId(), matchMode: '所有', conditions: [{ id: genId(), field: null, op: '等于', value: '' }] }
-  ];
-  groupConnectors.value = [];
 }
 
 function handleCancel() {
@@ -276,9 +365,13 @@ function handleCancel() {
 </script>
 
 <template>
-  <v-dialog v-model="props.dialog" max-width="560">
+  <v-dialog :model-value="dialog" @update:model-value="emits('update:dialog', $event)" max-width="560">
     <v-card class="loc-card" rounded="xl" elevation="8">
       <v-card-item class="loc-card-header">
+        <div class="loc-title-row">
+          <span class="loc-title">{{ KIND_TITLES[kind] }}设置</span>
+          <span v-if="editId !== null" class="loc-edit-badge">编辑</span>
+        </div>
         <v-tabs
           v-model="tab"
           fixed-tabs
@@ -287,215 +380,233 @@ function handleCancel() {
           slider-color="#4f8cff"
           class="bento-tabs"
         >
-          <v-tab value="1">单一选项</v-tab>
-          <v-tab value="2">条件选项</v-tab>
+          <v-tab value="single">常规</v-tab>
+          <v-tab value="conditional">条件</v-tab>
         </v-tabs>
       </v-card-item>
 
       <v-card-text class="loc-card-body">
-        <v-tabs-window v-model="tab" class="loc-tabs-window">
-          <v-tabs-window-item value="1">
-            <material-panel
-              :active-nav="props.initialPanel"
-              :initial-field="props.initialField"
-              :initial-option="props.initialOption"
-              @select_option="selectedOption = $event"
-            />
-          </v-tabs-window-item>
+        <!-- ============ 常规 ============ -->
+        <div v-show="tab === 'single'" class="loc-pane">
+          <MaterialSettings v-model:option="currentOption" :kind="kind" />
+        </div>
 
-          <v-tabs-window-item value="2">
-            <v-window v-model="step" class="loc-step-window">
-              <v-window-item :value="1" class="loc-step-panel">
-                <div class="cond-header">
-                  <div class="cond-header-left">
-                    <v-icon color="#4f8cff" size="18" class="cond-header-icon">mdi-filter-variant</v-icon>
-                    <span class="cond-header-title">查找条件</span>
-                  </div>
-                  <v-chip
-                    size="x-small"
+        <!-- ============ 条件：两步 ============ -->
+        <div v-show="tab === 'conditional'" class="loc-pane">
+          <!-- 第一步：条件 -->
+          <div v-if="step === 1" class="cond-step">
+            <div class="cond-header">
+              <div class="cond-steps">
+                <span class="step-dot active">1</span>
+                <span class="step-name active">设置条件</span>
+                <span class="step-sep">→</span>
+                <span class="step-dot">2</span>
+                <span class="step-name">{{ KIND_TITLES[kind] }}设置</span>
+              </div>
+              <v-chip
+                size="x-small"
+                variant="outlined"
+                color="grey"
+                class="adv-chip"
+                @click="logicType = logicType === 'simple' ? 'advanced' : 'simple'"
+              >
+                {{ logicType === 'simple' ? '高级筛选' : '简易筛选' }}
+              </v-chip>
+            </div>
+
+            <div class="cond-body-simple" v-if="logicType === 'simple'">
+              <div class="cond-match-mode">
+                <span class="mode-label-text">符合以下</span>
+                <v-btn-toggle v-model="matchMode" mandatory density="compact" class="mode-toggle-pills">
+                  <v-btn value="所有" size="x-small" variant="flat" class="toggle-pill">且</v-btn>
+                  <v-btn value="任一" size="x-small" variant="flat" class="toggle-pill">或</v-btn>
+                </v-btn-toggle>
+                <span class="mode-label-text">条件</span>
+              </div>
+
+              <div class="cond-scroll">
+                <div v-for="(cond, idx) in conditions" :key="cond.id" class="cond-row-bento">
+                  <v-select
+                    :items="bpStore.fieldNames"
+                    v-model="cond.field"
+                    density="compact"
                     variant="outlined"
+                    hide-details
+                    placeholder="字段"
+                    class="bento-field"
+                  />
+                  <v-select
+                    :items="ops"
+                    v-model="cond.op"
+                    density="compact"
+                    variant="outlined"
+                    hide-details
+                    class="bento-op"
+                  />
+                  <v-text-field
+                    v-model="cond.value"
+                    density="compact"
+                    variant="outlined"
+                    hide-details
+                    placeholder="值"
+                    :disabled="cond.op === '为空' || cond.op === '不为空'"
+                    class="bento-value"
+                  />
+                  <v-btn
+                    icon="mdi-close"
+                    variant="text"
+                    size="x-small"
                     color="grey"
-                    class="adv-chip"
-                    @click="logicType = logicType === 'simple' ? 'advanced' : 'simple'"
-                  >
-                    {{ logicType === 'simple' ? '高级筛选' : '简易筛选' }}
-                  </v-chip>
+                    @click="removeCondition(idx)"
+                  />
                 </div>
+              </div>
+            </div>
 
-                <div class="cond-body-simple" v-if="logicType === 'simple'">
-                  <div class="cond-match-mode">
-                    <span class="mode-label-text">符合以下</span>
-                    <v-btn-toggle v-model="matchMode" mandatory density="compact" class="mode-toggle-pills">
+            <div class="cond-body-advanced" v-else>
+              <div class="adv-scroll">
+                <template v-for="(group, gIdx) in groups" :key="group.id">
+                  <div class="bento-group-card">
+                    <div class="group-card-accent"></div>
+                    <div class="group-card-body">
+                      <div class="group-head-row">
+                        <div class="group-badge">G{{ gIdx + 1 }}</div>
+                        <v-btn-toggle v-model="group.matchMode" mandatory density="compact" class="mode-toggle-pills-sm">
+                          <v-btn value="所有" size="x-small" variant="flat" class="toggle-pill-sm">且</v-btn>
+                          <v-btn value="任一" size="x-small" variant="flat" class="toggle-pill-sm">或</v-btn>
+                        </v-btn-toggle>
+                        <v-spacer />
+                        <v-btn
+                          icon="mdi-trash-can-outline"
+                          variant="text"
+                          size="x-small"
+                          color="grey-darken-1"
+                          :disabled="groups.length <= 1"
+                          @click="removeGroup(gIdx)"
+                        />
+                      </div>
+
+                      <div class="group-cond-list">
+                        <div v-for="(cond, cIdx) in group.conditions" :key="cond.id" class="cond-row-bento">
+                          <v-select
+                            :items="bpStore.fieldNames"
+                            v-model="cond.field"
+                            density="compact"
+                            variant="outlined"
+                            hide-details
+                            placeholder="字段"
+                            class="bento-field"
+                          />
+                          <v-select
+                            :items="ops"
+                            v-model="cond.op"
+                            density="compact"
+                            variant="outlined"
+                            hide-details
+                            class="bento-op"
+                          />
+                          <v-text-field
+                            v-model="cond.value"
+                            density="compact"
+                            variant="outlined"
+                            hide-details
+                            placeholder="值"
+                            :disabled="cond.op === '为空' || cond.op === '不为空'"
+                            class="bento-value"
+                          />
+                          <v-btn
+                            icon="mdi-close"
+                            variant="text"
+                            size="x-small"
+                            color="grey"
+                            @click="removeGroupCondition(gIdx, cIdx)"
+                          />
+                        </div>
+                        <v-chip
+                          variant="text"
+                          size="small"
+                          color="#4f8cff"
+                          class="add-chip"
+                          @click="addGroupCondition(gIdx)"
+                        >
+                          <v-icon start size="14">mdi-plus</v-icon>条件
+                        </v-chip>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div v-if="gIdx < groups.length - 1" class="connector-row">
+                    <v-btn-toggle v-model="groupConnectors[gIdx]" mandatory density="compact" class="mode-toggle-pills">
                       <v-btn value="所有" size="x-small" variant="flat" class="toggle-pill">且</v-btn>
                       <v-btn value="任一" size="x-small" variant="flat" class="toggle-pill">或</v-btn>
                     </v-btn-toggle>
-                    <span class="mode-label-text">条件</span>
                   </div>
+                </template>
 
-                  <div class="cond-scroll">
-                    <div v-for="(cond, idx) in conditions" :key="cond.id" class="cond-row-bento">
-                      <v-select
-                        :items="fieldsForSimple()"
-                        v-model="cond.field"
-                        density="compact"
-                        variant="outlined"
-                        hide-details
-                        placeholder="字段"
-                        class="bento-field"
-                      />
-                      <v-select
-                        :items="ops"
-                        v-model="cond.op"
-                        density="compact"
-                        variant="outlined"
-                        hide-details
-                        class="bento-op"
-                      />
-                      <v-text-field
-                        v-model="cond.value"
-                        density="compact"
-                        variant="outlined"
-                        hide-details
-                        placeholder="值"
-                        :disabled="cond.op === '为空' || cond.op === '不为空'"
-                        class="bento-value"
-                      />
-                      <v-btn
-                        icon="mdi-close"
-                        variant="text"
-                        size="x-small"
-                        color="grey"
-                        @click="removeCondition(idx)"
-                      />
-                    </div>
-                  </div>
-                </div>
+                <v-chip
+                  variant="tonal"
+                  size="small"
+                  color="#4f8cff"
+                  class="add-group-chip"
+                  @click="addGroup"
+                >
+                  <v-icon start size="14">mdi-plus-box-outline</v-icon>添加条件组
+                </v-chip>
+              </div>
+            </div>
+          </div>
 
-                <div class="cond-body-advanced" v-else>
-                  <div class="adv-scroll">
-                    <template v-for="(group, gIdx) in groups" :key="group.id">
-                      <div class="bento-group-card">
-                        <div class="group-card-accent"></div>
-                        <div class="group-card-body">
-                          <div class="group-head-row">
-                            <div class="group-badge">G{{ gIdx + 1 }}</div>
-                            <v-btn-toggle v-model="group.matchMode" mandatory density="compact" class="mode-toggle-pills-sm">
-                              <v-btn value="所有" size="x-small" variant="flat" class="toggle-pill-sm">且</v-btn>
-                              <v-btn value="任一" size="x-small" variant="flat" class="toggle-pill-sm">或</v-btn>
-                            </v-btn-toggle>
-                            <v-spacer />
-                            <v-btn
-                              icon="mdi-trash-can-outline"
-                              variant="text"
-                              size="x-small"
-                              color="grey-darken-1"
-                              :disabled="groups.length <= 1"
-                              @click="removeGroup(gIdx)"
-                            />
-                          </div>
-
-                          <div class="group-cond-list">
-                            <div v-for="(cond, cIdx) in group.conditions" :key="cond.id" class="cond-row-bento">
-                              <v-select
-                                :items="fieldsForGroup(gIdx)"
-                                v-model="cond.field"
-                                density="compact"
-                                variant="outlined"
-                                hide-details
-                                placeholder="字段"
-                                class="bento-field"
-                              />
-                              <v-select
-                                :items="ops"
-                                v-model="cond.op"
-                                density="compact"
-                                variant="outlined"
-                                hide-details
-                                class="bento-op"
-                              />
-                              <v-text-field
-                                v-model="cond.value"
-                                density="compact"
-                                variant="outlined"
-                                hide-details
-                                placeholder="值"
-                                :disabled="cond.op === '为空' || cond.op === '不为空'"
-                                class="bento-value"
-                              />
-                              <v-btn
-                                icon="mdi-close"
-                                variant="text"
-                                size="x-small"
-                                color="grey"
-                                @click="removeGroupCondition(gIdx, cIdx)"
-                              />
-                            </div>
-                            <v-chip
-                              variant="text"
-                              size="small"
-                              color="#4f8cff"
-                              class="add-chip"
-                              @click="addGroupCondition(gIdx)"
-                            >
-                              <v-icon start size="14">mdi-plus</v-icon>条件
-                            </v-chip>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div v-if="gIdx < groups.length - 1" class="connector-row">
-                        <v-btn-toggle v-model="groupConnectors[gIdx]" mandatory density="compact" class="mode-toggle-pills">
-                          <v-btn value="所有" size="x-small" variant="flat" class="toggle-pill">且</v-btn>
-                          <v-btn value="任一" size="x-small" variant="flat" class="toggle-pill">或</v-btn>
-                        </v-btn-toggle>
-                      </div>
-                    </template>
-
-                    <v-chip
-                      variant="tonal"
-                      size="small"
-                      color="#4f8cff"
-                      class="add-group-chip"
-                      @click="addGroup"
-                    >
-                      <v-icon start size="14">mdi-plus-box-outline</v-icon>添加条件组
-                    </v-chip>
-                  </div>
-                </div>
-              </v-window-item>
-              <v-window-item :value="2">
-                <material-panel
-                  :active-nav="props.initialPanel"
-                  :initial-field="props.initialField"
-                  :initial-option="props.initialOption"
-                  @select_option="selectedOption = $event"
-                />
-              </v-window-item>
-            </v-window>
-          </v-tabs-window-item>
-        </v-tabs-window>
+          <!-- 第二步：常规设置 -->
+          <div v-else class="cond-step">
+            <div class="cond-header">
+              <div class="cond-steps">
+                <span class="step-dot done">✓</span>
+                <span class="step-name done" @click="step = 1">设置条件</span>
+                <span class="step-sep">→</span>
+                <span class="step-dot active">2</span>
+                <span class="step-name active">{{ KIND_TITLES[kind] }}设置</span>
+              </div>
+            </div>
+            <div class="settings-wrap">
+              <MaterialSettings v-model:option="currentOption" :kind="kind" />
+            </div>
+          </div>
+        </div>
       </v-card-text>
 
-      <v-card-actions v-if="tab=='1'" class="dialog-actions">
-        <v-spacer></v-spacer>
-        <v-btn variant="text" rounded="lg" @click="handleCancel">取消</v-btn>
-        <v-btn variant="flat" rounded="lg" color="#4f8cff" :disabled="!selectedOption" @click="handleConfirm">确定</v-btn>
-      </v-card-actions>
-
-      <v-card-actions v-if="tab=='2'&&step==1" class="dialog-actions">
-        <v-chip variant="text" size="small" color="#4f8cff" v-if="logicType==='simple'" @click="addCondition">
+      <v-card-actions class="dialog-actions">
+        <v-chip
+          v-if="tab === 'conditional' && step === 1 && logicType === 'simple'"
+          variant="text"
+          size="small"
+          color="#4f8cff"
+          @click="addCondition"
+        >
           <v-icon start size="14">mdi-plus</v-icon>条件
         </v-chip>
-        <v-spacer></v-spacer>
-        <v-btn variant="text" rounded="lg" @click="handleCancel">取消</v-btn>
-        <v-btn variant="flat" rounded="lg" color="#4f8cff" @click="goNext">下一步</v-btn>
-      </v-card-actions>
+        <v-spacer />
 
-      <v-card-actions v-if="tab=='2'&&step==2" class="dialog-actions">
-        <v-btn variant="text" rounded="lg" @click="step--">上一步</v-btn>
-        <v-spacer></v-spacer>
         <v-btn variant="text" rounded="lg" @click="handleCancel">取消</v-btn>
-        <v-btn variant="flat" rounded="lg" color="#4f8cff" :disabled="!selectedOption" @click="handleConfirm">确定</v-btn>
+        <v-btn
+          v-if="tab === 'conditional' && step === 2"
+          variant="text"
+          rounded="lg"
+          @click="step = 1"
+        >上一步</v-btn>
+        <v-btn
+          v-if="tab === 'conditional' && step === 1"
+          variant="flat"
+          rounded="lg"
+          color="#4f8cff"
+          @click="goNext"
+        >下一步</v-btn>
+        <v-btn
+          v-if="tab === 'single' || step === 2"
+          variant="flat"
+          rounded="lg"
+          color="#4f8cff"
+          @click="handleConfirm"
+        >确定</v-btn>
       </v-card-actions>
 
       <v-snackbar v-model="snackbar" :timeout="2500" color="error" location="top" class="bento-snackbar">
@@ -507,9 +618,8 @@ function handleCancel() {
 
 <style scoped>
 .loc-card {
-  height: 40vh;
-  min-height: 40vh;
-  max-height: 40vh;
+  height: 70vh;
+  max-height: 640px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -517,20 +627,49 @@ function handleCancel() {
 
 .loc-card-header {
   flex-shrink: 0;
-  padding: 0 16px;
+  padding: 12px 16px 0;
+}
+
+.loc-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.loc-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.loc-edit-badge {
+  font-size: 10px;
+  font-weight: 600;
+  color: #4f8cff;
+  background: rgba(79, 140, 255, 0.1);
+  border-radius: 6px;
+  padding: 2px 7px;
 }
 
 .loc-card-body {
   flex: 1;
   min-height: 0;
-  padding: 0 16px !important;
+  padding: 8px 16px 0 !important;
   overflow: hidden;
   position: relative;
 }
 
+.loc-pane {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 /* ========= tabs ========= */
 .bento-tabs {
-  --v-tabs-height: 44px;
+  --v-tabs-height: 40px;
 }
 .bento-tabs :deep(.v-tab) {
   font-size: 13px;
@@ -548,60 +687,88 @@ function handleCancel() {
   border-radius: 2px;
 }
 
-/* ========= layout ========= */
-.loc-tabs-window {
-  position: absolute;
-  inset: 0;
-  height: 100% !important;
+.dialog-actions {
+  flex-shrink: 0;
+  padding: 10px 16px;
+  border-top: 1px solid rgba(0, 0, 0, 0.05);
 }
 
-.loc-step-window {
-  height: 100% !important;
-}
-
-.loc-step-panel {
+/* ========= condition steps ========= */
+.cond-step {
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
-  padding: 0 8px;
 }
 
-.dialog-actions {
-  padding: 10px 16px;
-  border-top: 1px solid rgba(0,0,0,0.05);
+.settings-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
 }
 
-:deep(.v-window__container) {
-  height: 100% !important;
+.settings-wrap > :deep(*) {
+  flex: 1;
+  min-width: 0;
 }
 
-:deep(.v-window-item) {
-  height: 100%;
-  overflow: hidden;
-}
-
-/* ========= cond header ========= */
 .cond-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 6px 0 10px;
+  padding: 4px 0 10px;
+  flex-shrink: 0;
 }
 
-.cond-header-left {
+.cond-steps {
   display: flex;
   align-items: center;
   gap: 6px;
 }
 
-.cond-header-icon {
+.step-dot {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #e2e8f0;
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
 }
 
-.cond-header-title {
-  font-size: 13px;
-  font-weight: 700;
+.step-dot.active {
+  background: #4f8cff;
+  color: #fff;
+}
+
+.step-dot.done {
+  background: rgba(79, 140, 255, 0.12);
+  color: #4f8cff;
+}
+
+.step-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #94a3b8;
+}
+
+.step-name.active {
   color: #1e293b;
+}
+
+.step-name.done {
+  color: #4f8cff;
+  cursor: pointer;
+}
+
+.step-sep {
+  font-size: 12px;
+  color: #cbd5e1;
+  margin: 0 2px;
 }
 
 .adv-chip {
@@ -661,7 +828,7 @@ function handleCancel() {
   border-radius: 12px;
   overflow: hidden;
   background: #fff;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
   flex-shrink: 0;
   margin: 6px 0;
 }
@@ -750,14 +917,14 @@ function handleCancel() {
 .mode-toggle-pills {
   border-radius: 8px;
   overflow: hidden;
-  background: rgba(0,0,0,0.04);
+  background: rgba(0, 0, 0, 0.04);
   flex-shrink: 0;
 }
 
 .mode-toggle-pills-sm {
   border-radius: 6px;
   overflow: hidden;
-  background: rgba(0,0,0,0.04);
+  background: rgba(0, 0, 0, 0.04);
   flex-shrink: 0;
 }
 
@@ -793,7 +960,7 @@ function handleCancel() {
 :deep(.mode-toggle-pills-sm .v-btn--active) {
   background: #4f8cff !important;
   color: #fff !important;
-  box-shadow: 0 1px 3px rgba(79,140,255,0.3);
+  box-shadow: 0 1px 3px rgba(79, 140, 255, 0.3);
 }
 
 /* ========= input refinements ========= */
@@ -802,20 +969,20 @@ function handleCancel() {
 :deep(.bento-value .v-field) {
   border-radius: 8px !important;
   box-shadow: none !important;
-  border-color: rgba(0,0,0,0.1) !important;
+  border-color: rgba(0, 0, 0, 0.1) !important;
 }
 
 :deep(.bento-field .v-field:hover),
 :deep(.bento-op .v-field:hover),
 :deep(.bento-value .v-field:hover) {
-  border-color: rgba(79,140,255,0.35) !important;
+  border-color: rgba(79, 140, 255, 0.35) !important;
 }
 
 :deep(.bento-field .v-field--focused),
 :deep(.bento-op .v-field--focused),
 :deep(.bento-value .v-field--focused) {
   border-color: #4f8cff !important;
-  box-shadow: 0 0 0 2px rgba(79,140,255,0.12) !important;
+  box-shadow: 0 0 0 2px rgba(79, 140, 255, 0.12) !important;
 }
 
 :deep(.bento-field .v-field__input),
@@ -840,7 +1007,7 @@ function handleCancel() {
 
 .cond-scroll::-webkit-scrollbar-thumb,
 .adv-scroll::-webkit-scrollbar-thumb {
-  background: rgba(0,0,0,0.12);
+  background: rgba(0, 0, 0, 0.12);
   border-radius: 4px;
 }
 </style>
