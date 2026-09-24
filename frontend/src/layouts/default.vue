@@ -143,6 +143,15 @@ function openSettings() {
 }
 </script>
 
+<style>
+/* 锁定应用外壳为视口高度，使 v-main 及以下页面的 height: 100% 链条生效，
+   内容超出时在页面内部容器中滚动，而不是撑高整个页面 */
+.v-application__wrap {
+  height: 100vh;
+  overflow: hidden;
+}
+</style>
+
 <style scoped>
 .gemini-sidebar {
   border-right: none !important;
@@ -402,6 +411,7 @@ function openSettings() {
 }
 .main-wrap {
   flex: 1 1 0% !important;
+  min-height: 0 !important;
   overflow: hidden !important;
 }
 

@@ -1373,9 +1373,21 @@ const handleReset = () => {
 
 .batch-col {
   display: flex;
+  height: 100%;
   min-height: 0;
   overflow: hidden;
   padding-bottom: 12px;
+}
+
+/* 小屏下列上下堆叠时，高度由内容决定，整列在 batch-grid 内部滚动 */
+@media (max-width: 1279.98px) {
+  .batch-grid {
+    overflow-y: auto;
+  }
+
+  .batch-col {
+    height: auto;
+  }
 }
 
 /* ---- cards ---- */
@@ -1517,6 +1529,7 @@ const handleReset = () => {
   min-height: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .material-fade-enter-active,
@@ -1581,9 +1594,9 @@ const handleReset = () => {
 .thumb-grid {
   flex: 1;
   min-height: 0;
-  height: 0;
   display: grid;
   grid-template-columns: repeat(3, 1fr);
+  align-content: start;
   gap: 6px;
   padding: 4px 0;
   overflow-y: auto;
