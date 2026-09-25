@@ -3,7 +3,7 @@ import { defineStore } from "pinia";
 import {Store} from '@tauri-apps/plugin-store'
 import { mkdir } from "@tauri-apps/plugin-fs";
 import { appLocalDataDir } from '@tauri-apps/api/path';
-import type { StoreIcon, IconOption, MaterialKind } from '@/types/icon';
+import type { StoreIcon, IconOption, MaterialKind, LoopBlock, DocxStructureItem } from '@/types/icon';
 
 interface Pointer {
   pageIndex: number;  
@@ -45,6 +45,12 @@ export const useBPStore = defineStore("bpstore", () => {
   const pdfFile = ref<File | null>(null);
   const excelFile = ref<File | null>(null);
   const pdfScale = ref<number>(2);
+
+  /** 模板类型：PDF / DOCX */
+  const templateType = ref<'pdf' | 'docx'>('pdf');
+  const docxFile = ref<File | null>(null);
+  const docxStructure = ref<DocxStructureItem[]>([]);
+  const loopBlocks = ref<LoopBlock[]>([]);
 
   /** 各材料类型最近一次确认的样式（不含 fieldName/src/icon/text 等标识字段），新拖入的同类材料沿用 */
   const materialStyles = ref<Record<MaterialKind, Partial<IconOption>>>({
@@ -193,6 +199,10 @@ export const useBPStore = defineStore("bpstore", () => {
     pdfFile,
     excelFile,
     pdfScale,
+    templateType,
+    docxFile,
+    docxStructure,
+    loopBlocks,
     materialStyles,
     addRegularPointer,
     addConditionalPointer,

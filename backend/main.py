@@ -13,7 +13,13 @@ import requests
 import tempfile
 import os
 import shutil
+import base64
 from pypdf import PdfReader, PdfWriter
+from docx import Document
+from docx.shared import Pt, Mm, RGBColor
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
+from docxtpl import DocxTemplate, InlineImage
 from reportlab.pdfgen import canvas
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
@@ -163,6 +169,610 @@ async def get_excel_headers(file: UploadFile = File(...)):
         "content": content,
         "has_merged_cells": has_merged_cells,
     }
+
+def sse_message(event_type: str, payload: dict) -> str:
+    return "data: " + json.dumps({"type": event_type, **payload}, ensure_ascii=False) + "\n\n"
+
+
+# ============================================================
+# DOCX 相关接口
+# ============================================================
+
+@app.post("/api/docx/parse")
+async def parse_docx(file: UploadFile = File(...)):
+    """解析 DOCX 结构，返回带 anchorId 的段落/表格序列，供前端定位与循环块配置。"""
+    content = await file.read()
+    try:
+        doc = Document(io.BytesIO(content))
+    except Exception as e:
+        return {"error": f"无法解析 DOCX 文件: {e}"}
+
+    structure = []
+    p_idx = 0
+    t_idx = 0
+    for block in doc.element.body:
+        tag = block.tag
+        if tag == qn("w:p"):
+            # 段落
+            texts = []
+            for node in block.iter(qn("w:t")):
+                texts.append(node.text or "")
+            structure.append({
+                "type": "paragraph",
+                "anchorId": f"p_{p_idx:04d}",
+                "text": "".join(texts),
+            })
+            p_idx += 1
+        elif tag == qn("w:tbl"):
+            # 表格
+            rows = []
+            for r_idx, tr in enumerate(block.findall(qn("w:tr"))):
+                cells = []
+                for tc in tr.findall(qn("w:tc")):
+                    cell_texts = []
+                    for node in tc.iter(qn("w:t")):
+                        cell_texts.append(node.text or "")
+                    cells.append("".join(cell_texts))
+                rows.append({
+                    "anchorId": f"tr_{t_idx:04d}_{r_idx:04d}",
+                    "cells": cells,
+                })
+            structure.append({"type": "table", "rows": rows})
+            t_idx += 1
+    return {"structure": structure}
+
+
+def _docx_resolve_image_path(src: str, base_path: str) -> Path | None:
+    """把前端传过来的图片 src 还原成本地路径。"""
+    if not src:
+        return None
+    src = src.strip()
+    if src.startswith("http://asset.localhost/"):
+        local = resolve_local_path_from_url(src)
+        return Path(local)
+    # 相对路径按数据目录解析
+    p = Path(src)
+    if not p.is_absolute() and base_path:
+        p = Path(base_path) / src
+    return p if p.exists() else None
+
+
+def _docx_apply_text_style(paragraph, font_family: str, font_size: float, font_weight: int, italic: bool, color: str, opacity: float):
+    """对段落设置字体样式（作用于 run 级别）。"""
+    for run in paragraph.runs:
+        run.font.name = font_family
+        run._element.rPr.rFonts.set(qn("w:eastAsia"), font_family)
+        run.font.size = Pt(font_size)
+        run.font.bold = font_weight >= 600
+        run.font.italic = italic
+        hex_str = color.lstrip("#")
+        if len(hex_str) == 6:
+            r = int(hex_str[0:2], 16)
+            g = int(hex_str[2:4], 16)
+            b = int(hex_str[4:6], 16)
+            run.font.color.rgb = RGBColor(r, g, b)
+
+
+def _docx_insert_run_at_offset(paragraph, text: str, style: dict, offset: int):
+    """在段落指定字符偏移处插入带样式的文本 run。"""
+    full_text = paragraph.text
+    if offset < 0:
+        offset = 0
+    if offset > len(full_text):
+        offset = len(full_text)
+
+    before = full_text[:offset]
+    after = full_text[offset:]
+
+    # 保存原有第一个 run 的样式作为默认样式
+    base_rpr = None
+    if paragraph.runs:
+        first_r = paragraph.runs[0]._element
+        rpr = first_r.find(qn("w:rPr"))
+        if rpr is not None:
+            base_rpr = rpr
+
+    # 清空段落
+    for r in list(paragraph.runs):
+        r._element.getparent().remove(r._element)
+
+    def _add_run(txt, custom_style=None):
+        if not txt:
+            return
+        run = paragraph.add_run(txt)
+        if custom_style:
+            run.font.name = custom_style.get("fontFamily", "微软雅黑")
+            run._element.rPr.rFonts.set(qn("w:eastAsia"), custom_style.get("fontFamily", "微软雅黑"))
+            run.font.size = Pt(custom_style.get("fontSize", 12))
+            run.font.bold = custom_style.get("fontWeight", 400) >= 600
+            run.font.italic = custom_style.get("italic", False)
+            hex_str = custom_style.get("color", "#000000").lstrip("#")
+            if len(hex_str) == 6:
+                run.font.color.rgb = RGBColor(int(hex_str[0:2], 16), int(hex_str[2:4], 16), int(hex_str[4:6], 16))
+        elif base_rpr is not None:
+            # 继承原样式
+            import copy
+            run._element.insert(0, copy.deepcopy(base_rpr))
+
+    _add_run(before)
+    _add_run(text, style)
+    _add_run(after)
+
+
+def _docx_insert_image_at_offset(paragraph, image_path: Path, width_mm: float, offset: int):
+    """在段落指定字符偏移处插入 InlineImage。"""
+    full_text = paragraph.text
+    if offset < 0:
+        offset = 0
+    if offset > len(full_text):
+        offset = len(full_text)
+
+    before = full_text[:offset]
+    after = full_text[offset:]
+
+    base_rpr = None
+    if paragraph.runs:
+        first_r = paragraph.runs[0]._element
+        rpr = first_r.find(qn("w:rPr"))
+        if rpr is not None:
+            base_rpr = rpr
+
+    for r in list(paragraph.runs):
+        r._element.getparent().remove(r._element)
+
+    def _add_run(txt):
+        if not txt:
+            return
+        run = paragraph.add_run(txt)
+        if base_rpr is not None:
+            import copy
+            run._element.insert(0, copy.deepcopy(base_rpr))
+
+    _add_run(before)
+    run = paragraph.add_run()
+    run.add_picture(str(image_path), width=Mm(width_mm))
+    _add_run(after)
+
+
+def _docx_set_paragraph_text(paragraph, text: str, style: dict):
+    """清空段落所有 run 并写入单一样式文本（用于整段替换）。"""
+    for r in list(paragraph.runs):
+        r._element.getparent().remove(r._element)
+    run = paragraph.add_run(text)
+    run.font.name = style.get("fontFamily", "微软雅黑")
+    run._element.rPr.rFonts.set(qn("w:eastAsia"), style.get("fontFamily", "微软雅黑"))
+    run.font.size = Pt(style.get("fontSize", 12))
+    run.font.bold = style.get("fontWeight", 400) >= 600
+    run.font.italic = style.get("italic", False)
+    hex_str = style.get("color", "#000000").lstrip("#")
+    if len(hex_str) == 6:
+        run.font.color.rgb = RGBColor(int(hex_str[0:2], 16), int(hex_str[2:4], 16), int(hex_str[4:6], 16))
+
+
+def _docx_insert_inline_image(paragraph, image_path: Path, width_mm: float):
+    """在段落中插入 InlineImage。"""
+    run = paragraph.add_run()
+    run.add_picture(str(image_path), width=Mm(width_mm))
+
+
+def _docx_add_bookmark(paragraph, bookmark_id: str, bookmark_name: str):
+    """在段落级别插入书签，作为循环块或字段锚点。"""
+    start = OxmlElement("w:bookmarkStart")
+    start.set(qn("w:id"), bookmark_id)
+    start.set(qn("w:name"), bookmark_name)
+    end = OxmlElement("w:bookmarkEnd")
+    end.set(qn("w:id"), bookmark_id)
+    paragraph._p.insert(0, start)
+    paragraph._p.append(end)
+
+
+def _docx_wrap_table_row_with_loop(tbl, row_idx: int, loop_var: str, list_var: str):
+    """把表格第 row_idx 行用 {%tr for item in items %} / {%tr endfor %} 包裹。"""
+    tr = tbl.rows[row_idx]._tr
+    first_tc = tr.findall(qn("w:tc"))[0]
+    # 在该单元格最前面插入 for 标签段落
+    for_p = OxmlElement("w:p")
+    r = OxmlElement("w:r")
+    t = OxmlElement("w:t")
+    t.text = "{%tr for " + loop_var + " in " + list_var + " %}"
+    r.append(t)
+    for_p.append(r)
+    first_tc.insert(0, for_p)
+
+    last_tc = tr.findall(qn("w:tc"))[-1]
+    # 在该单元格最后面插入 endfor 标签段落
+    end_p = OxmlElement("w:p")
+    r = OxmlElement("w:r")
+    t = OxmlElement("w:t")
+    t.text = "{%tr endfor %}"
+    r.append(t)
+    end_p.append(r)
+    last_tc.append(end_p)
+
+
+def _docx_wrap_paragraph_with_loop(doc: Document, anchor_id: str, loop_var: str, list_var: str):
+    """根据 anchor_id 找到段落，在其前后插入 {%p for %} / {%p endfor %}。"""
+    try:
+        target_idx = int(anchor_id.split("_")[1])
+    except Exception:
+        return False
+    body = doc.element.body
+    p_idx = 0
+    for child in body:
+        if child.tag == qn("w:p"):
+            if p_idx == target_idx:
+                # 在段落前插入 for 段落
+                for_p = OxmlElement("w:p")
+                r = OxmlElement("w:r")
+                t = OxmlElement("w:t")
+                t.text = "{%p for " + loop_var + " in " + list_var + " %}"
+                r.append(t)
+                for_p.append(r)
+                child.addprevious(for_p)
+                # 在段落后插入 endfor 段落
+                end_p = OxmlElement("w:p")
+                r = OxmlElement("w:r")
+                t = OxmlElement("w:t")
+                t.text = "{%p endfor %}"
+                r.append(t)
+                end_p.append(r)
+                child.addnext(end_p)
+                return True
+            p_idx += 1
+    return False
+
+
+def _docx_build_loop_rows(
+    all_rows: list[list],
+    headers: list[str],
+    main_row: list,
+    loop_cfg: dict,
+) -> list[dict]:
+    """根据循环块配置动态查询出子数据行。"""
+    data_range = loop_cfg.get("dataRange", "all")
+    range_col = loop_cfg.get("rangeColumn")
+    conditions = loop_cfg.get("conditions", [])
+    match_mode = loop_cfg.get("matchMode", "所有")
+
+    # 数据范围：全部行 / 指定列非空的行
+    if data_range == "columnNonEmpty" and range_col and range_col in headers:
+        col_idx = headers.index(range_col)
+        rows = [r for r in all_rows if r[col_idx] not in (None, "", "None")]
+    else:
+        rows = all_rows
+
+    def resolve_value(v):
+        if isinstance(v, str) and v.startswith("{{") and v.endswith("}}"):
+            expr = v[2:-2].strip()
+            if expr.startswith("当前行."):
+                field = expr[4:]
+                if field in headers:
+                    return str(main_row[headers.index(field)] or "")
+            return v
+        return v
+
+    def check(row):
+        row_dict = {headers[i]: row[i] for i in range(len(headers))}
+        results = []
+        for cond in conditions:
+            field = cond.get("field")
+            op = cond.get("op")
+            val = resolve_value(cond.get("value"))
+            fv = row_dict.get(field, "")
+            if fv is None:
+                fv = ""
+            fv = str(fv)
+            if op == "等于":
+                res = fv == val
+            elif op == "不等于":
+                res = fv != val
+            elif op == "包含":
+                res = val in fv
+            elif op == "不包含":
+                res = val not in fv
+            elif op == "为空":
+                res = fv == ""
+            elif op == "不为空":
+                res = fv != ""
+            else:
+                res = False
+            results.append(res)
+        if not results:
+            return True
+        return all(results) if match_mode == "所有" else any(results)
+
+    return [{headers[i]: r[i] for i in range(len(headers))} for r in rows if check(r)]
+
+
+@app.post("/generate_batch_docx")
+async def generate_batch_docx(
+    docx_file: UploadFile = File(...),
+    excel_file: UploadFile = File(...),
+    path: str = Form(...),
+    icon_list: str = Form(default="[]"),
+    loop_blocks: str = Form(default="[]"),
+    filename_config: str = Form(default="{}"),
+):
+    """DOCX 批量生成（SSE 流式）。"""
+    docx_content = await docx_file.read()
+    excel_content = await excel_file.read()
+    df = pd.read_excel(io.BytesIO(excel_content))
+    headers = df.columns.tolist()
+    content = df.values.tolist()
+
+    try:
+        icon_list_data = json.loads(icon_list)
+    except json.JSONDecodeError:
+        icon_list_data = []
+    try:
+        loop_blocks_data = json.loads(loop_blocks)
+    except json.JSONDecodeError:
+        loop_blocks_data = []
+    try:
+        filename_cfg = json.loads(filename_config)
+    except json.JSONDecodeError:
+        filename_cfg = {}
+
+    name_parts = filename_cfg.get("parts") or []
+    name_separator = filename_cfg.get("separator", "_")
+
+    def sanitize_filename(name: str) -> str:
+        for ch in '\\/:*?"<>|':
+            name = name.replace(ch, "_")
+        return name.strip().strip(".")
+
+    def build_filename(row_data: dict, row_idx: int) -> str:
+        segments = []
+        for part in name_parts:
+            part_type = part.get("type")
+            if part_type == "field":
+                value = row_data.get(part.get("field"))
+                segment = "" if value is None else str(value)
+            elif part_type == "seq":
+                num = int(part.get("start") or 1) + row_idx
+                digits = int(part.get("digits") or 0)
+                segment = str(num).zfill(digits) if digits else str(num)
+            else:
+                segment = str(part.get("text") or "")
+            if segment:
+                segments.append(segment)
+        name = sanitize_filename(name_separator.join(segments))
+        return name or str(row_idx + 1)
+
+    target_dir = Path(path) / "generateDocx"
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    # 所有行都作为主记录行生成
+    main_rows = list(enumerate(content))
+
+    image_cache: dict = {}
+
+    def event_stream():
+        try:
+            total_rows = len(main_rows)
+            yield sse_message("start", {"total": total_rows})
+
+            generated_files = []
+            used_names = {}
+
+            for out_idx, (row_idx, row) in enumerate(main_rows):
+                row_data = {headers[i]: row[i] for i in range(len(headers))}
+
+                # 深拷贝模板，避免多行之间互相污染
+                tpl_doc = Document(io.BytesIO(docx_content))
+
+                # ===== 1) 处理循环块：包裹循环标签 + 准备每行子数据 =====
+                loop_context: dict[str, list[dict]] = {}
+                for block in loop_blocks_data:
+                    anchor_id = block.get("anchorId", "")
+                    loop_var = block.get("loopVar", "item")
+                    list_var = block.get("listVar", "明细")
+                    loop_type = block.get("loopType", "paragraph")  # paragraph | tableRow
+                    cfg_rows = _docx_build_loop_rows(content, headers, row, block)
+                    loop_context[list_var] = cfg_rows
+
+                    if loop_type == "tableRow":
+                        # 定位表格与行号
+                        # anchorId 格式 tr_0001_0002
+                        parts = anchor_id.split("_")
+                        if len(parts) >= 3:
+                            t_idx = int(parts[1])
+                            r_idx = int(parts[2])
+                            tbls = tpl_doc.tables
+                            if t_idx < len(tbls):
+                                tbl = tbls[t_idx]
+                                if r_idx < len(tbl.rows):
+                                    _docx_wrap_table_row_with_loop(tbl, r_idx, loop_var, list_var)
+                    else:
+                        _docx_wrap_paragraph_with_loop(tpl_doc, anchor_id, loop_var, list_var)
+
+                # ===== 2) 处理字段/文本/图标：在指定字符偏移处插入内容 =====
+                # 字段类：anchorId 指向段落，在 charOffset 处插入当前行字段值
+                # 文本类：anchorId 指向段落，在 charOffset 处插入固定文本
+                # 图标类：anchorId 指向段落，在 charOffset 处插入符号字符
+                # 图片类：anchorId 指向段落，在 charOffset 处插入 InlineImage
+                for icon in icon_list_data:
+                    option = icon.get("option", {})
+                    item_type = option.get("type")
+                    anchor_id = icon.get("anchorId", "")
+                    if not anchor_id:
+                        continue
+
+                    # 条件显隐判断（复用 PDF 的条件逻辑）
+                    if icon.get("mode") == "conditional":
+                        if not _docx_evaluate_conditions(row_data, icon):
+                            # 条件不满足时删除该段落或置空
+                            _docx_remove_paragraph_by_anchor(tpl_doc, anchor_id)
+                            continue
+
+                    # charOffset 存在 pointer.clientY 中（前端拖放时记录）
+                    char_offset = icon.get("pointer", {}).get("clientY", 0)
+
+                    try:
+                        target_idx = int(anchor_id.split("_")[1])
+                    except Exception:
+                        continue
+                    body = tpl_doc.element.body
+                    p_idx = 0
+                    target_p = None
+                    for child in body:
+                        if child.tag == qn("w:p"):
+                            if p_idx == target_idx:
+                                from docx.text.paragraph import Paragraph
+                                target_p = Paragraph(child, tpl_doc)
+                                break
+                            p_idx += 1
+                    if target_p is None:
+                        continue
+
+                    style = {
+                        "fontFamily": option.get("fontFamily", "微软雅黑"),
+                        "fontSize": max(4, math.floor((icon.get("size") or 120) * 0.12)),
+                        "fontWeight": option.get("fontWeight", 400),
+                        "italic": option.get("italic", False),
+                        "color": option.get("color", "#000000"),
+                    }
+
+                    if item_type == "field":
+                        field_name = option.get("fieldName")
+                        if field_name and field_name in row_data:
+                            _docx_insert_run_at_offset(target_p, str(row_data[field_name] or ""), style, char_offset)
+                    elif item_type == "text":
+                        _docx_insert_run_at_offset(target_p, option.get("text", ""), style, char_offset)
+                    elif item_type == "icon":
+                        _docx_insert_run_at_offset(target_p, option.get("icon", ""), {
+                            **style,
+                            "fontFamily": "Segoe UI Symbol",
+                        }, char_offset)
+                    elif item_type == "image":
+                        src = option.get("src", "")
+                        img_path = _docx_resolve_image_path(src, path)
+                        if img_path and img_path.exists():
+                            # 用宽度近似换算：size(px) * 0.2646
+                            width_mm = max(10, (icon.get("size") or 120) * 0.2646 * 0.3)
+                            _docx_insert_image_at_offset(target_p, img_path, width_mm, char_offset)
+
+                # ===== 3) 用 docxtpl 渲染 =====
+                # 先把处理过的 Document 转 bytes，再交给 DocxTemplate
+                buf = io.BytesIO()
+                tpl_doc.save(buf)
+                buf.seek(0)
+                tpl = DocxTemplate(buf)
+
+                context = dict(row_data)
+                # 注入循环变量
+                for list_var, rows in loop_context.items():
+                    context[list_var] = rows
+
+                try:
+                    tpl.render(context)
+                except Exception as e:
+                    yield sse_message("error", {"message": f"模板渲染失败(第{out_idx+1}行): {e}"})
+                    return
+
+                base_name = build_filename(row_data, row_idx)
+                if base_name in used_names:
+                    used_names[base_name] += 1
+                    base_name = f"{base_name}({used_names[base_name]})"
+                else:
+                    used_names[base_name] = 0
+                output_path = target_dir / f"{base_name}.docx"
+                tpl.save(str(output_path))
+
+                generated_files.append(str(output_path))
+                yield sse_message("progress", {
+                    "current": out_idx + 1,
+                    "total": total_rows,
+                })
+
+            yield sse_message("done", {
+                "msg": "DOCX 已保存",
+                "path": str(target_dir),
+                "files": generated_files,
+            })
+        except Exception as error:
+            yield sse_message("error", {"message": f"生成失败: {error}"})
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+def _docx_remove_paragraph_by_anchor(doc: Document, anchor_id: str):
+    """根据 anchor_id 删除对应段落（用于条件不满足时隐藏字段）。"""
+    try:
+        target_idx = int(anchor_id.split("_")[1])
+    except Exception:
+        return
+    body = doc.element.body
+    p_idx = 0
+    for child in body:
+        if child.tag == qn("w:p"):
+            if p_idx == target_idx:
+                body.remove(child)
+                return
+            p_idx += 1
+
+
+def _docx_evaluate_conditions(row_data: dict, icon: dict) -> bool:
+    """与 PDF 条件评估逻辑保持一致。"""
+    logic_type = icon.get("logicType", "simple")
+
+    def check_condition(conditions: list, match_mode: str) -> bool:
+        results = []
+        for condition in conditions:
+            field = condition.get("field")
+            op = condition.get("op")
+            value = condition.get("value")
+            field_value = row_data.get(field, "")
+            if field_value is None:
+                field_value = ""
+            field_value = str(field_value)
+            if op == "等于":
+                result = field_value == value
+            elif op == "不等于":
+                result = field_value != value
+            elif op == "包含":
+                result = value in field_value
+            elif op == "不包含":
+                result = value not in field_value
+            elif op == "为空":
+                result = field_value == ""
+            elif op == "不为空":
+                result = field_value != ""
+            else:
+                result = False
+            results.append(result)
+        if not results:
+            return True
+        if match_mode == "所有":
+            return all(results)
+        return any(results)
+
+    if logic_type == "advanced":
+        groups = icon.get("groups", [])
+        if not groups:
+            return True
+        group_results = []
+        for group in groups:
+            group_conditions = group.get("conditions", [])
+            group_match_mode = group.get("matchMode", "所有")
+            group_results.append(check_condition(group_conditions, group_match_mode))
+        result = group_results[0]
+        connectors = icon.get("groupConnectors", [])
+        for i, connector in enumerate(connectors):
+            if connector == "所有":
+                result = result and group_results[i + 1]
+            else:
+                result = result or group_results[i + 1]
+        return result
+
+    conditions = icon.get("conditions", [])
+    match_mode = icon.get("matchMode", "所有")
+    return check_condition(conditions, match_mode)
+
 
 @app.post("/generate_batch_pdf")
 async def generate_batch_pdf(

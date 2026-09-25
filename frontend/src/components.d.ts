@@ -9,12 +9,12 @@ export {}
 declare module 'vue' {
   export interface GlobalComponents {
     AppFooter: typeof import('./components/AppFooter.vue')['default']
+    DocxViewer: typeof import('./components/docxview/DocxViewer.vue')['default']
     LibraryPanel: typeof import('./components/LibraryPanel.vue')['default']
     LocationDialog: typeof import('./components/pdfview/LocationDialog.vue')['default']
     MaterialSettings: typeof import('./components/pdfview/MaterialSettings.vue')['default']
     PdfViewer: typeof import('./components/pdfview/PdfViewer.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
-    SettingsDialog: typeof import('./components/SettingsDialog.vue')['default']
   }
 }

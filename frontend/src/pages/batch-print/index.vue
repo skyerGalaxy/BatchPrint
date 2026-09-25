@@ -23,10 +23,10 @@
             <div class="section">
               <div class="section-label">模板</div>
               <v-file-input
-                :key="'pdf-' + resetKey"
-                accept="application/pdf,.pdf"
-                prepend-icon="mdi-file-pdf"
-                label="选择 PDF 模板"
+                :key="'tpl-' + resetKey"
+                accept="application/pdf,.pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                prepend-icon="mdi-file-document-outline"
+                label="选择模板（PDF / DOCX）"
                 variant="outlined"
                 density="comfortable"
                 hide-details
@@ -377,7 +377,7 @@
               @click="generateBatchPDF"
             >
               <v-icon size="18" class="mr-2">mdi-file-document-multiple</v-icon>
-              {{ generating ? `生成中 ${generateCurrent}/${generateTotal}` : '生成 PDF' }}
+              {{ generating ? `生成中 ${generateCurrent}/${generateTotal}` : (bpStore.templateType === 'pdf' ? '生成 PDF' : '生成 DOCX') }}
             </v-btn>
 
             <div v-if="generating" class="generate-progress">
@@ -390,7 +390,7 @@
                 stream
               />
               <div class="generate-progress-text">
-                <span>正在生成 PDF…</span>
+                <span>{{ bpStore.templateType === 'pdf' ? '正在生成 PDF…' : '正在生成 DOCX…' }}</span>
                 <span>{{ generateCurrent }} / {{ generateTotal }}（{{ Math.round(generateProgress) }}%）</span>
               </div>
             </div>
@@ -420,7 +420,13 @@
 
           <div class="preview-surface">
             <div class="preview-scroll">
-              <PdfViewer :pdf-src="pdfSrc" />
+              <PdfViewer v-if="bpStore.templateType === 'pdf'" :pdf-src="pdfSrc" />
+              <DocxViewer
+                v-else
+                ref="docxViewerRef"
+                @drop-icon="handleDocxDrop"
+                @contextmenu-block="openLoopBlockDialog"
+              />
             </div>
           </div>
         </div>
@@ -641,6 +647,123 @@
       @click="closeImageContextMenu"
       @contextmenu.prevent="closeImageContextMenu"
     ></div>
+
+    <!-- 循环块配置对话框 -->
+    <v-dialog v-model="loopBlockDialog" max-width="640" persistent>
+      <v-card rounded="xl" elevation="8">
+        <v-card-item>
+          <div class="d-flex align-center">
+            <v-icon color="primary" size="24" class="mr-2">mdi-repeat</v-icon>
+            <v-card-title class="pa-0">配置循环块</v-card-title>
+          </div>
+          <v-card-subtitle class="pa-0 mt-1">
+            {{ currentLoopBlock?.anchorId }} · {{ currentLoopBlock?.loopType === 'tableRow' ? '表格行循环' : '段落循环' }}
+          </v-card-subtitle>
+        </v-card-item>
+
+        <v-card-text class="pt-4">
+          <v-row dense>
+            <v-col cols="6">
+              <v-text-field
+                v-model="loopBlockForm.loopVar"
+                label="循环变量名"
+                density="compact"
+                variant="outlined"
+                hide-details
+                placeholder="item"
+              />
+            </v-col>
+            <v-col cols="6">
+              <v-text-field
+                v-model="loopBlockForm.listVar"
+                label="列表变量名"
+                density="compact"
+                variant="outlined"
+                hide-details
+                placeholder="明细"
+              />
+            </v-col>
+          </v-row>
+
+          <v-row dense class="mt-2">
+            <v-col cols="6">
+              <v-select
+                v-model="loopBlockForm.dataRange"
+                :items="[{ title: '全部行', value: 'all' }, { title: '指定列非空的行', value: 'columnNonEmpty' }]"
+                label="数据范围"
+                density="compact"
+                variant="outlined"
+                hide-details
+              />
+            </v-col>
+            <v-col cols="6">
+              <v-select
+                v-model="loopBlockForm.rangeColumn"
+                :items="bpStore.fieldNames"
+                label="范围列"
+                density="compact"
+                variant="outlined"
+                hide-details
+                :disabled="loopBlockForm.dataRange !== 'columnNonEmpty'"
+                clearable
+              />
+            </v-col>
+          </v-row>
+
+          <div class="mt-4">
+            <div class="d-flex align-center justify-space-between mb-2">
+              <span class="text-subtitle-2">过滤条件</span>
+              <v-btn size="small" variant="tonal" color="primary" @click="addLoopCondition">
+                <v-icon size="16" class="mr-1">mdi-plus</v-icon>添加条件
+              </v-btn>
+            </div>
+
+            <div v-for="(cond, idx) in loopBlockForm.conditions" :key="cond.id" class="d-flex align-center ga-2 mb-2">
+              <v-select
+                v-model="cond.field"
+                :items="bpStore.fieldNames"
+                density="compact"
+                variant="outlined"
+                hide-details
+                placeholder="字段"
+                style="width: 140px"
+              />
+              <v-select
+                v-model="cond.op"
+                :items="['等于', '不等于', '包含', '不包含', '为空', '不为空']"
+                density="compact"
+                variant="outlined"
+                hide-details
+                style="width: 100px"
+              />
+              <v-text-field
+                v-model="cond.value"
+                density="compact"
+                variant="outlined"
+                hide-details
+                placeholder="值 或 {{当前行.字段名}}"
+                class="flex-1"
+              />
+              <v-btn icon size="x-small" variant="text" color="error" @click="removeLoopCondition(idx)">
+                <v-icon size="16">mdi-close</v-icon>
+              </v-btn>
+            </div>
+
+            <v-radio-group v-model="loopBlockForm.matchMode" inline density="compact" hide-details class="mt-1">
+              <v-radio label="满足所有条件" value="所有" />
+              <v-radio label="满足任一条件" value="任一" />
+            </v-radio-group>
+          </div>
+        </v-card-text>
+
+        <v-card-actions>
+          <v-btn variant="text" color="error" @click="deleteLoopBlock">删除循环块</v-btn>
+          <v-spacer />
+          <v-btn variant="text" @click="loopBlockDialog = false">取消</v-btn>
+          <v-btn color="primary" @click="saveLoopBlock">保存</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </v-container>
 </template>
 
@@ -651,12 +774,14 @@ import { invoke, convertFileSrc } from '@tauri-apps/api/core'
 import { readDir, exists, writeFile, mkdir, remove } from '@tauri-apps/plugin-fs'
 import { Store } from '@tauri-apps/plugin-store'
 import PdfViewer from '@/components/pdfview/PdfViewer.vue'
+import DocxViewer from '@/components/docxview/DocxViewer.vue'
 import { useBPStore } from '@/stores/bpstore'
-import type { IconOption } from '@/types/icon'
+import type { IconOption, LoopBlock, Condition, StoreIcon, MaterialKind } from '@/types/icon'
 import { getFontsList, loadCustomFonts } from '@/utils/fontLoader'
 
 const pdfSrc = ref<string>('')
 const bpStore = useBPStore()
+const docxViewerRef = ref<InstanceType<typeof DocxViewer> | null>(null)
 
 const activeMaterialNav = ref('table')
 const materialNavItems = [
@@ -998,6 +1123,20 @@ const resultSuccess = ref(false)
 const resultMessage = ref('')
 const resultPath = ref('')
 
+/* ========= 循环块配置 ========= */
+const loopBlockDialog = ref(false)
+const currentLoopBlock = ref<LoopBlock | null>(null)
+const pendingAnchorId = ref('')
+const pendingLoopType = ref<'paragraph' | 'tableRow'>('paragraph')
+const loopBlockForm = ref({
+  loopVar: 'item',
+  listVar: '明细',
+  dataRange: 'all' as 'all' | 'columnNonEmpty',
+  rangeColumn: '' as string | undefined,
+  conditions: [] as Condition[],
+  matchMode: '所有' as '所有' | '任一',
+})
+
 interface NamePart {
   type: 'field' | 'seq' | 'text' | 'sep'
   field?: string
@@ -1140,7 +1279,8 @@ const buildFileName = (rowIndex: number): string => {
 
 const fileNamePreview = computed(() => {
   const name = buildFileName(0)
-  return (name || '1') + '.pdf'
+  const ext = bpStore.templateType === 'pdf' ? '.pdf' : '.docx'
+  return (name || '1') + ext
 })
 
 async function apiPost(url: string, formData: FormData, retries = 30): Promise<any> {
@@ -1183,14 +1323,49 @@ watch(() => bpStore.fontsVersion, () => {
 
 const handleFileChange = async (value: File | File[] | null) => {
   const file = Array.isArray(value) ? value[0] : value
+  if (!file) return
 
-  if (file && file.type === 'application/pdf') {
+  // 根据上传文件自动识别模板类型
+  const name = file.name.toLowerCase()
+  const isPdf = file.type === 'application/pdf' || name.endsWith('.pdf')
+  const isDocx = file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || name.endsWith('.docx')
+
+  if (isPdf) {
+    bpStore.templateType = 'pdf'
     bpStore.iconList = []
     pdfSrc.value = URL.createObjectURL(file)
     bpStore.pdfSrc = pdfSrc.value
     bpStore.pdfFile = file
+    bpStore.docxFile = null
+    bpStore.docxStructure = []
+    bpStore.loopBlocks = []
+  } else if (isDocx) {
+    bpStore.templateType = 'docx'
+    bpStore.iconList = []
+    bpStore.pdfFile = null
+    bpStore.pdfSrc = ''
+    pdfSrc.value = ''
+    bpStore.docxFile = file
+    await parseDocxStructure(file)
   } else {
-    alert('请选择有效的PDF文件')
+    alert('请选择有效的 PDF 或 DOCX 模板文件')
+  }
+}
+
+const parseDocxStructure = async (file: File) => {
+  const formData = new FormData()
+  formData.append('file', file)
+  try {
+    const res = await apiPost('http://localhost:8000/api/docx/parse', formData)
+    if (res.data.error) {
+      alert(res.data.error)
+      bpStore.docxStructure = []
+      return
+    }
+    bpStore.docxStructure = res.data.structure || []
+  } catch (e: any) {
+    alert('解析 DOCX 失败: ' + (e.message || '未知错误'))
+    bpStore.docxStructure = []
   }
 }
 
@@ -1234,14 +1409,6 @@ const handleExcelChange = async (event: Event) => {
 }
 
 const generateBatchPDF = async () => {
-  if (!bpStore.pdfFile) {
-    resultSuccess.value = false
-    resultMessage.value = '请先选择PDF模板'
-    resultPath.value = ''
-    resultDialog.value = true
-    return
-  }
-
   if (!bpStore.excelFile) {
     resultSuccess.value = false
     resultMessage.value = '请先选择Excel数据文件'
@@ -1252,7 +1419,23 @@ const generateBatchPDF = async () => {
 
   if (bpStore.iconList.length === 0) {
     resultSuccess.value = false
-    resultMessage.value = '请先在PDF模板上放置图章/签名标注，图标列表为空'
+    resultMessage.value = '请先在模板上放置材料，图标列表为空'
+    resultPath.value = ''
+    resultDialog.value = true
+    return
+  }
+
+  if (bpStore.templateType === 'pdf' && !bpStore.pdfFile) {
+    resultSuccess.value = false
+    resultMessage.value = '请先选择PDF模板'
+    resultPath.value = ''
+    resultDialog.value = true
+    return
+  }
+
+  if (bpStore.templateType === 'docx' && !bpStore.docxFile) {
+    resultSuccess.value = false
+    resultMessage.value = '请先选择DOCX模板'
     resultPath.value = ''
     resultDialog.value = true
     return
@@ -1265,22 +1448,23 @@ const generateBatchPDF = async () => {
 
   try {
     const formData = new FormData()
-
-    formData.append('pdf_file', bpStore.pdfFile)
     formData.append('excel_file', bpStore.excelFile)
     formData.append('path', bpStore.dataPath || '')
     formData.append('icon_list', JSON.stringify(bpStore.iconList))
-    formData.append('pdf_scale', bpStore.pdfScale.toString())
-    formData.append(
-      'filename_config',
-      JSON.stringify({ parts: nameParts.value, separator: '' })
-    )
+    formData.append('filename_config', JSON.stringify({ parts: nameParts.value, separator: '' }))
 
-    // 后端通过 SSE 逐行上报进度
-    const resp = await fetch('http://localhost:8000/generate_batch_pdf', {
-      method: 'POST',
-      body: formData,
-    })
+    let endpoint = ''
+    if (bpStore.templateType === 'pdf') {
+      formData.append('pdf_file', bpStore.pdfFile!)
+      formData.append('pdf_scale', bpStore.pdfScale.toString())
+      endpoint = 'http://localhost:8000/generate_batch_pdf'
+    } else {
+      formData.append('docx_file', bpStore.docxFile!)
+      formData.append('loop_blocks', JSON.stringify(bpStore.loopBlocks))
+      endpoint = 'http://localhost:8000/generate_batch_docx'
+    }
+
+    const resp = await fetch(endpoint, { method: 'POST', body: formData })
     if (!resp.ok || !resp.body) {
       throw new Error(`后端响应异常: HTTP ${resp.status}`)
     }
@@ -1317,13 +1501,13 @@ const generateBatchPDF = async () => {
     if (!donePayload) throw new Error('未收到后端完成事件')
 
     resultSuccess.value = true
-    resultMessage.value = donePayload.msg || 'PDF批量生成成功！'
+    resultMessage.value = donePayload.msg || '批量生成成功！'
     resultPath.value = donePayload.path || ''
     resultDialog.value = true
   } catch (error) {
-    console.error('生成PDF失败:', error)
+    console.error('生成失败:', error)
     resultSuccess.value = false
-    resultMessage.value = (error as Error)?.message || 'PDF批量生成出错，请查看浏览器控制台'
+    resultMessage.value = (error as Error)?.message || '批量生成出错，请查看浏览器控制台'
     resultPath.value = ''
     resultDialog.value = true
   } finally {
@@ -1348,10 +1532,114 @@ const handleReset = () => {
   bpStore.fieldNames = []
   bpStore.excelContent = []
   bpStore.iconList = []
+  bpStore.templateType = 'pdf'
+  bpStore.docxFile = null
+  bpStore.docxStructure = []
+  bpStore.loopBlocks = []
   nameParts.value = []
   customText.value = ''
   insertIndex.value = 0
   resetKey.value++
+}
+
+/* ========= DOCX 拖放与循环块 ========= */
+function handleDocxDrop(payload: { option: IconOption; anchorId: string; charOffset: number }) {
+  // 根据 option.type 推断材料类型以沿用样式
+  let kind: MaterialKind = 'table'
+  if (payload.option.type === 'image') {
+    kind = payload.option.imageKind === 'seal' ? 'seal' : 'signature'
+  } else if (payload.option.type === 'icon') {
+    kind = 'icon'
+  } else if (payload.option.type === 'text') {
+    kind = 'text'
+  }
+  const option = bpStore.instantiateOption(kind, payload.option)
+  const maxId = bpStore.iconList.reduce((max, i) => Math.max(max, i.id), 0)
+  const newIcon: StoreIcon = {
+    id: maxId + 1,
+    pageIndex: 1,
+    pointer: { clientX: 0, clientY: payload.charOffset },
+    mode: 'single',
+    option,
+    size: option.size ?? 120,
+    scale: 1,
+    anchorId: payload.anchorId,
+  }
+  bpStore.iconList.push(newIcon)
+}
+
+function openLoopBlockDialog(payload: { anchorId: string; loopType: 'paragraph' | 'tableRow' }) {
+  pendingAnchorId.value = payload.anchorId
+  pendingLoopType.value = payload.loopType
+  const existing = bpStore.loopBlocks.find(b => b.anchorId === payload.anchorId)
+  if (existing) {
+    currentLoopBlock.value = existing
+    loopBlockForm.value = {
+      loopVar: existing.loopVar,
+      listVar: existing.listVar,
+      dataRange: existing.dataRange,
+      rangeColumn: existing.rangeColumn,
+      conditions: JSON.parse(JSON.stringify(existing.conditions)),
+      matchMode: existing.matchMode,
+    }
+  } else {
+    currentLoopBlock.value = null
+    loopBlockForm.value = {
+      loopVar: 'item',
+      listVar: '明细',
+      dataRange: 'all',
+      rangeColumn: undefined,
+      conditions: [],
+      matchMode: '所有',
+    }
+  }
+  loopBlockDialog.value = true
+}
+
+function addLoopCondition() {
+  loopBlockForm.value.conditions.push({
+    id: Date.now(),
+    field: null,
+    op: '等于',
+    value: '',
+  })
+}
+
+function removeLoopCondition(idx: number) {
+  loopBlockForm.value.conditions.splice(idx, 1)
+}
+
+function saveLoopBlock() {
+  const anchorId = currentLoopBlock.value?.anchorId ?? pendingAnchorId.value
+  const loopType = currentLoopBlock.value?.loopType ?? pendingLoopType.value
+  if (!anchorId) return
+  const block: LoopBlock = {
+    id: currentLoopBlock.value?.id ?? Date.now(),
+    anchorId,
+    loopType,
+    loopVar: loopBlockForm.value.loopVar || 'item',
+    listVar: loopBlockForm.value.listVar || '明细',
+    dataRange: loopBlockForm.value.dataRange,
+    rangeColumn: loopBlockForm.value.rangeColumn,
+    conditions: JSON.parse(JSON.stringify(loopBlockForm.value.conditions)),
+    matchMode: loopBlockForm.value.matchMode,
+  }
+  const idx = bpStore.loopBlocks.findIndex(b => b.anchorId === anchorId)
+  if (idx >= 0) {
+    bpStore.loopBlocks[idx] = block
+  } else {
+    bpStore.loopBlocks.push(block)
+  }
+  loopBlockDialog.value = false
+}
+
+function deleteLoopBlock() {
+  if (!currentLoopBlock.value) return
+  const idx = bpStore.loopBlocks.findIndex(b => b.anchorId === currentLoopBlock.value!.anchorId)
+  if (idx >= 0) {
+    bpStore.loopBlocks.splice(idx, 1)
+  }
+  loopBlockDialog.value = false
 }
 </script>
 

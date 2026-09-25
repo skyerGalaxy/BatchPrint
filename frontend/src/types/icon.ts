@@ -55,4 +55,27 @@ export interface StoreIcon {
   size?: number
   scale?: number
   rotation?: number
+  /** DOCX 模式下锚定的段落/表格行 ID，如 p_0001 / tr_0001_0002 */
+  anchorId?: string
+}
+
+/** DOCX 模板结构：段落或表格 */
+export interface DocxStructureItem {
+  type: 'paragraph' | 'table'
+  anchorId?: string
+  text?: string
+  rows?: Array<{ anchorId: string; cells: string[] }>
+}
+
+/** 循环块配置 */
+export interface LoopBlock {
+  id: number
+  anchorId: string
+  loopType: 'paragraph' | 'tableRow'
+  dataRange: 'all' | 'columnNonEmpty'
+  rangeColumn?: string
+  conditions: Condition[]
+  matchMode: MatchMode
+  loopVar: string
+  listVar: string
 }
