@@ -73,9 +73,9 @@
               prepend-icon="mdi-cog-outline"
               title="设置"
               value="settings"
+              to="/settings"
               class="footer-item"
               rounded="pill"
-              @click="openSettings"
             />
           </v-list>
         </div>
@@ -84,7 +84,7 @@
           icon
           variant="text"
           density="comfortable"
-          @click="openSettings"
+          to="/settings"
         >
           <v-icon>mdi-cog-outline</v-icon>
           <v-tooltip activator="parent" location="right">设置</v-tooltip>
@@ -114,17 +114,11 @@
   </v-main>
 
   <AppFooter />
-
-  <SettingsDialog ref="settingsDialog" />
 </template>
 
 <script setup lang="ts">
-import SettingsDialog from '@/components/SettingsDialog.vue'
-
 const rail = ref(true)
 const drawerOpen = ref(true)
-
-const settingsDialog = ref<InstanceType<typeof SettingsDialog> | null>(null)
 
 const recentItems = ref([
   { title: 'OpenCode 快捷键配置指南', to: '/hand-notes' },
@@ -136,10 +130,6 @@ const recentItems = ref([
 
 function toggleRail() {
   rail.value = !rail.value
-}
-
-function openSettings() {
-  settingsDialog.value?.openDialog()
 }
 </script>
 

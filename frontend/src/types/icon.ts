@@ -25,6 +25,8 @@ export interface IconOption {
   fontWeight?: number
   /** 斜体（字段 / 文本类型） */
   italic?: boolean
+  /** 是否对文字应用字体扰动，缺省视为 true */
+  applyJitter?: boolean
   opacity?: number
   color?: string
   src?: string

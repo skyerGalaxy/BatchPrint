@@ -1596,6 +1596,9 @@ const handleReset = () => {
   min-height: 0;
   display: grid;
   grid-template-columns: repeat(3, 1fr);
+  /* 容器定高且内容溢出时，auto 行轨道会坍缩到最小尺寸导致卡片重叠，
+     强制按内容（卡片 aspect-ratio 推导高度）决定行高 */
+  grid-auto-rows: max-content;
   align-content: start;
   gap: 6px;
   padding: 4px 0;

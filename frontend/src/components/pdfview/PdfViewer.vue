@@ -34,6 +34,7 @@ import { ref, onMounted, onUnmounted, watch, nextTick } from "vue";
 import { useBPStore } from '@/stores/bpstore';
 import LocationDialog from "./LocationDialog.vue";
 import { loadCustomFonts } from '@/utils/fontLoader';
+import { jitterConfig, loadJitterConfig, drawJitterText } from '@/utils/fontJitter';
 import type { StoreIcon, Condition as IconCondition, IconOption, MaterialKind } from '@/types/icon';
 
 
@@ -680,26 +681,50 @@ function drawIcon(ctx: CanvasRenderingContext2D, icon: StoreIcon, isSelected: bo
   if (icon.option.type === 'field') {
     const fontFamily = icon.option.fontFamily || '楷体';
     const fontSize = Math.max(8, Math.floor(size * 0.3));
-    drawFieldText(ctx,
-      icon.option.fieldName || '',
-      fontFamily,
-      fontSize,
-      icon.option.fontWeight ?? 400,
-      icon.option.italic ?? false,
-      icon.option.opacity ?? 1,
-      icon.option.color ?? '#000000',
-      0, 0
-    );
+    const fontWeight = icon.option.fontWeight ?? 400;
+    const italic = icon.option.italic ?? false;
+    const baseOpacity = icon.option.opacity ?? 1;
+    const color = icon.option.color ?? '#000000';
+
+    if (icon.option.applyJitter !== false) {
+      drawJitterText(ctx, getFieldValue(icon.option.fieldName || ''), {
+        fontFamily, fontSize, fontWeight, italic, color, opacity: baseOpacity,
+        seed: icon.id * 1000 + 11,
+      });
+    } else {
+      drawFieldText(ctx,
+        icon.option.fieldName || '',
+        fontFamily,
+        fontSize,
+        fontWeight,
+        italic,
+        baseOpacity,
+        color,
+        0, 0
+      );
+    }
   } else if (icon.option.type === 'text') {
     const fontFamily = icon.option.fontFamily || '楷体';
     const fontSize = Math.max(8, Math.floor(size * 0.3));
-    ctx.globalAlpha = icon.option.opacity ?? 1;
-    ctx.fillStyle = icon.option.color ?? '#000000';
-    ctx.font = `${icon.option.italic ? 'italic ' : ''}${icon.option.fontWeight ?? 400} ${fontSize}px "${fontFamily}"`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(icon.option.text || '', 0, 0);
-    ctx.globalAlpha = 1;
+    const fontWeight = icon.option.fontWeight ?? 400;
+    const italic = icon.option.italic ?? false;
+    const baseOpacity = icon.option.opacity ?? 1;
+    const color = icon.option.color ?? '#000000';
+
+    if (icon.option.applyJitter !== false) {
+      drawJitterText(ctx, icon.option.text || '', {
+        fontFamily, fontSize, fontWeight, italic, color, opacity: baseOpacity,
+        seed: icon.id * 1000 + 22,
+      });
+    } else {
+      ctx.globalAlpha = baseOpacity;
+      ctx.fillStyle = color;
+      ctx.font = `${italic ? 'italic ' : ''}${fontWeight} ${fontSize}px "${fontFamily}"`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(icon.option.text || '', 0, 0);
+      ctx.globalAlpha = 1;
+    }
   } else if (icon.option.type === 'image') {
     drawImageIcon(ctx, icon, 0, 0, size);
   } else if (icon.option.type === 'icon') {
@@ -742,8 +767,9 @@ function drawIcon(ctx: CanvasRenderingContext2D, icon: StoreIcon, isSelected: bo
 // 初始化
 onMounted(async () => {
   document.addEventListener('keydown', handleKeyDown);
-  // 先加载自定义字体
+  // 先加载自定义字体与扰动配置
   await loadCustomFonts(bpStore.dataPath);
+  await loadJitterConfig();
   bpStore.pdfScale = pdfScale.value;
   
   // 然后加载 PDF
@@ -754,6 +780,9 @@ onMounted(async () => {
 onUnmounted(() => {
   document.removeEventListener('keydown', handleKeyDown);
 });
+
+// 扰动参数变化时实时重绘（设置页拖动滑动条 → PDF 文字即时更新）
+watch(jitterConfig, () => redrawAllPages(), { deep: true });
 
 // 当传入的 PDF 路径变化时重新加载
 watch(

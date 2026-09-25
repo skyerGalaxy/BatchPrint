@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue';
 import { useBPStore } from '@/stores/bpstore';
 import { getFontsList, loadCustomFonts } from '@/utils/fontLoader';
+import { jitterConfig, drawJitterText } from '@/utils/fontJitter';
 import type { IconOption, MaterialKind } from '@/types/icon';
 
 export type { MaterialKind };
@@ -90,6 +91,12 @@ const opacityModel = computed({
 const fontWeightModel = computed({
   get: () => option.value.fontWeight ?? 400,
   set: (v: number) => { option.value.fontWeight = v; },
+});
+
+/** 是否应用字体扰动：缺省视为应用 */
+const applyJitterModel = computed({
+  get: () => option.value.applyJitter !== false,
+  set: (v: boolean) => { option.value.applyJitter = v; },
 });
 
 /** 圆角：0-50，短边尺寸的百分比 */
@@ -205,6 +212,72 @@ const textStylePreview = computed(() => ({
   opacity: opacityModel.value,
   fontSize: Math.min(Math.floor(sizeModel.value * 0.22), 22) + 'px',
 }));
+
+/* ========= 文字预览（Canvas，支持扰动实时预览） ========= */
+const previewCanvasField = ref<HTMLCanvasElement | null>(null);
+const previewCanvasText = ref<HTMLCanvasElement | null>(null);
+
+function renderTextPreview(canvas: HTMLCanvasElement | null) {
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  const dpr = window.devicePixelRatio || 1;
+  const cssWidth = canvas.clientWidth || 220;
+  const cssHeight = canvas.clientHeight || 40;
+  if (canvas.width !== cssWidth * dpr || canvas.height !== cssHeight * dpr) {
+    canvas.width = cssWidth * dpr;
+    canvas.height = cssHeight * dpr;
+  }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cssWidth, cssHeight);
+
+  const text = previewChar.value;
+  const fontFamily = option.value.fontFamily || '楷体';
+  const fontSize = 20;
+  const fontWeight = option.value.fontWeight ?? 400;
+  const italic = option.value.italic ?? false;
+  const color = option.value.color || '#000000';
+  const opacity = opacityModel.value;
+
+  ctx.save();
+  ctx.translate(cssWidth / 2, cssHeight / 2);
+  if (applyJitterModel.value) {
+    drawJitterText(ctx, text, { fontFamily, fontSize, fontWeight, italic, color, opacity, seed: 42 });
+  } else {
+    ctx.globalAlpha = opacity;
+    ctx.fillStyle = color;
+    ctx.font = `${italic ? 'italic ' : ''}${fontWeight} ${fontSize}px "${fontFamily}", serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, 0, 0);
+    ctx.globalAlpha = 1;
+  }
+  ctx.restore();
+}
+
+function renderAllTextPreviews() {
+  renderTextPreview(previewCanvasField.value);
+  renderTextPreview(previewCanvasText.value);
+}
+
+watch(
+  () => [
+    previewChar.value,
+    option.value.fontFamily,
+    option.value.fontWeight,
+    option.value.italic,
+    option.value.color,
+    option.value.applyJitter,
+    opacityModel.value,
+  ],
+  () => nextTick(renderAllTextPreviews),
+  { deep: true },
+);
+watch(jitterConfig, () => renderAllTextPreviews(), { deep: true });
+// 切换材料类型 / 打开面板时 canvas 重建，需要重绘
+watch(() => props.kind, () => nextTick(renderAllTextPreviews));
+watch([previewCanvasField, previewCanvasText], () => nextTick(renderAllTextPreviews));
+onMounted(() => nextTick(renderAllTextPreviews));
 
 const PREVIEW_BOX = 72;
 const imagePreviewRadius = computed(() => `${Math.round((PREVIEW_BOX * cornerRadiusModel.value) / 100)}px`);
@@ -330,12 +403,24 @@ const imagePreviewRadius = computed(() => `${Math.round((PREVIEW_BOX * cornerRad
             />
             <span class="ms-op-value">{{ Math.round(opacityModel * 100) }}%</span>
           </div>
+
+          <div class="ms-row">
+            <v-icon size="15" color="#94a3b8">mdi-wave</v-icon>
+            <v-checkbox
+              v-model="applyJitterModel"
+              label="应用扰动"
+              density="compact"
+              hide-details
+              color="primary"
+              class="ms-jitter-check"
+            />
+          </div>
         </div>
       </div>
 
       <div class="ms-preview">
         <span class="ms-preview-label">预览</span>
-        <span class="ms-preview-text" :style="textStylePreview">{{ previewChar }}</span>
+        <canvas ref="previewCanvasField" class="ms-preview-canvas"></canvas>
       </div>
     </template>
 
@@ -817,12 +902,24 @@ const imagePreviewRadius = computed(() => `${Math.round((PREVIEW_BOX * cornerRad
             />
             <span class="ms-op-value">{{ Math.round(opacityModel * 100) }}%</span>
           </div>
+
+          <div class="ms-row">
+            <v-icon size="15" color="#94a3b8">mdi-wave</v-icon>
+            <v-checkbox
+              v-model="applyJitterModel"
+              label="应用扰动"
+              density="compact"
+              hide-details
+              color="primary"
+              class="ms-jitter-check"
+            />
+          </div>
         </div>
       </div>
 
       <div class="ms-preview">
         <span class="ms-preview-label">预览</span>
-        <span class="ms-preview-text" :style="textStylePreview">{{ previewChar }}</span>
+        <canvas ref="previewCanvasText" class="ms-preview-canvas"></canvas>
       </div>
     </template>
   </div>
@@ -935,6 +1032,13 @@ const imagePreviewRadius = computed(() => `${Math.round((PREVIEW_BOX * cornerRad
 
 .ms-row > .v-icon {
   flex-shrink: 0;
+}
+
+.ms-jitter-check {
+  margin-top: 0;
+}
+.ms-jitter-check :deep(.v-label) {
+  font-size: 12.5px;
 }
 
 .ms-select {
@@ -1244,6 +1348,12 @@ const imagePreviewRadius = computed(() => `${Math.round((PREVIEW_BOX * cornerRad
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+.ms-preview-canvas {
+  width: 100%;
+  height: 40px;
+  display: block;
 }
 
 .ms-preview-icon {
