@@ -406,7 +406,7 @@
               <span class="card-title">预览区</span>
             </div>
             <v-chip
-              v-if="bpStore.iconList.length > 0"
+              v-if="bpStore.templateType === 'pdf' && bpStore.iconList.length > 0"
               variant="outlined"
               size="small"
               color="grey"
@@ -424,7 +424,6 @@
               <DocxViewer
                 v-else
                 ref="docxViewerRef"
-                @drop-icon="handleDocxDrop"
                 @contextmenu-block="openLoopBlockDialog"
               />
             </div>
@@ -776,7 +775,7 @@ import { Store } from '@tauri-apps/plugin-store'
 import PdfViewer from '@/components/pdfview/PdfViewer.vue'
 import DocxViewer from '@/components/docxview/DocxViewer.vue'
 import { useBPStore } from '@/stores/bpstore'
-import type { IconOption, LoopBlock, Condition, StoreIcon, MaterialKind } from '@/types/icon'
+import type { IconOption, LoopBlock, Condition } from '@/types/icon'
 import { getFontsList, loadCustomFonts } from '@/utils/fontLoader'
 
 const pdfSrc = ref<string>('')
@@ -784,13 +783,26 @@ const bpStore = useBPStore()
 const docxViewerRef = ref<InstanceType<typeof DocxViewer> | null>(null)
 
 const activeMaterialNav = ref('table')
-const materialNavItems = [
-  { title: '表格', value: 'table', icon: 'mdi-table' },
-  { title: '签字', value: 'signature', icon: 'mdi-draw-pen' },
-  { title: '印章', value: 'seal', icon: 'mdi-seal-variant' },
-  { title: '图标', value: 'icon', icon: 'mdi-shape-outline' },
-  { title: '文本', value: 'text', icon: 'mdi-format-text' },
-]
+const materialNavItems = computed(() => {
+  const items = [
+    { title: '表格', value: 'table', icon: 'mdi-table' },
+    { title: '签字', value: 'signature', icon: 'mdi-draw-pen' },
+    { title: '印章', value: 'seal', icon: 'mdi-seal-variant' },
+    { title: '图标', value: 'icon', icon: 'mdi-shape-outline' },
+  ]
+  // DOCX 模板不提供文本材料
+  if (bpStore.templateType !== 'docx') {
+    items.push({ title: '文本', value: 'text', icon: 'mdi-format-text' })
+  }
+  return items
+})
+
+// 切换到 DOCX 后若停留在“文本”板块，回退到“表格”
+watch(() => bpStore.templateType, (type) => {
+  if (type === 'docx' && activeMaterialNav.value === 'text') {
+    activeMaterialNav.value = 'table'
+  }
+})
 
 // 鼠标停留切换材料板块（带短暂延迟，避免滑过时闪烁）
 let navHoverTimer: ReturnType<typeof setTimeout> | null = null
@@ -1417,7 +1429,8 @@ const generateBatchPDF = async () => {
     return
   }
 
-  if (bpStore.iconList.length === 0) {
+  // DOCX 模板的字段/图片直接插入在文档内，不依赖 iconList；仅 PDF 模板要求先放置材料
+  if (bpStore.templateType === 'pdf' && bpStore.iconList.length === 0) {
     resultSuccess.value = false
     resultMessage.value = '请先在模板上放置材料，图标列表为空'
     resultPath.value = ''
@@ -1459,7 +1472,15 @@ const generateBatchPDF = async () => {
       formData.append('pdf_scale', bpStore.pdfScale.toString())
       endpoint = 'http://localhost:8000/generate_batch_pdf'
     } else {
-      formData.append('docx_file', bpStore.docxFile!)
+      // 上传编辑器内最新的 DOCX 内容（包含用户在文档中的自由编辑），保存失败时回退原文件
+      const editedBuf: ArrayBuffer | null = await docxViewerRef.value?.getDocxArrayBuffer?.() ?? null
+      const originalFile = bpStore.docxFile!
+      const uploadFile = editedBuf
+        ? new File([editedBuf], originalFile.name, {
+            type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          })
+        : originalFile
+      formData.append('docx_file', uploadFile)
       formData.append('loop_blocks', JSON.stringify(bpStore.loopBlocks))
       endpoint = 'http://localhost:8000/generate_batch_docx'
     }
@@ -1542,32 +1563,7 @@ const handleReset = () => {
   resetKey.value++
 }
 
-/* ========= DOCX 拖放与循环块 ========= */
-function handleDocxDrop(payload: { option: IconOption; anchorId: string; charOffset: number }) {
-  // 根据 option.type 推断材料类型以沿用样式
-  let kind: MaterialKind = 'table'
-  if (payload.option.type === 'image') {
-    kind = payload.option.imageKind === 'seal' ? 'seal' : 'signature'
-  } else if (payload.option.type === 'icon') {
-    kind = 'icon'
-  } else if (payload.option.type === 'text') {
-    kind = 'text'
-  }
-  const option = bpStore.instantiateOption(kind, payload.option)
-  const maxId = bpStore.iconList.reduce((max, i) => Math.max(max, i.id), 0)
-  const newIcon: StoreIcon = {
-    id: maxId + 1,
-    pageIndex: 1,
-    pointer: { clientX: 0, clientY: payload.charOffset },
-    mode: 'single',
-    option,
-    size: option.size ?? 120,
-    scale: 1,
-    anchorId: payload.anchorId,
-  }
-  bpStore.iconList.push(newIcon)
-}
-
+/* ========= DOCX 循环块（字段/图片拖放由 DocxViewer 直接写入文档，不再走 iconList） ========= */
 function openLoopBlockDialog(payload: { anchorId: string; loopType: 'paragraph' | 'tableRow' }) {
   pendingAnchorId.value = payload.anchorId
   pendingLoopType.value = payload.loopType

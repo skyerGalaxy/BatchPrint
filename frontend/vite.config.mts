@@ -60,6 +60,11 @@ export default defineConfig({
     }),
   ],
   optimizeDeps: {
+    include: [
+      '@docx-editor.dev/vue',
+      '@docx-editor.dev/core',
+      '@docx-editor.dev/i18n',
+    ],
     exclude: [
       'vuetify',
       'vue-router',
@@ -67,6 +72,10 @@ export default defineConfig({
       'unplugin-vue-router/data-loaders',
       'unplugin-vue-router/data-loaders/basic',
     ],
+    // @docx-editor.dev/core 使用顶层 await，预打包目标需 >= es2022
+    esbuildOptions: {
+      target: 'es2022',
+    },
   },
   define: { 'process.env': {} },
   resolve: {

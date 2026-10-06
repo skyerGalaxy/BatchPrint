@@ -422,6 +422,34 @@ def _docx_wrap_paragraph_with_loop(doc: Document, anchor_id: str, loop_var: str,
     return False
 
 
+FIELD_CONTROL_TAG_PREFIX = "bpf_"
+
+
+def _docx_unwrap_field_controls(doc: Document) -> int:
+    """把批量字段内容控件（w:sdt，tag 以 bpf_ 开头）解包为普通内容。
+
+    编辑器中拖入的字段是“内容锁定”的内容控件，里面放着 docxtpl 占位符 {{字段名}}。
+    docxtpl 渲染后占位符已被替换为实际值；输出给最终用户的文件不应再保留锁定的
+    控件外壳，因此这里把 w:sdt 替换成其 w:sdtContent 的全部子节点（保留文本/run）。
+    """
+    count = 0
+    for sdt in list(doc.element.body.iter(qn("w:sdt"))):
+        tag_el = sdt.find(qn("w:sdtPr") + "/" + qn("w:tag"))
+        tag_val = tag_el.get(qn("w:val")) if tag_el is not None else None
+        if not tag_val or not tag_val.startswith(FIELD_CONTROL_TAG_PREFIX):
+            continue
+        content = sdt.find(qn("w:sdtContent"))
+        if content is None:
+            continue
+        for child in list(content):
+            sdt.addprevious(child)
+        parent = sdt.getparent()
+        if parent is not None:
+            parent.remove(sdt)
+        count += 1
+    return count
+
+
 def _docx_build_loop_rows(
     all_rows: list[list],
     headers: list[str],
@@ -560,6 +588,10 @@ async def generate_batch_docx(
 
                 # 深拷贝模板，避免多行之间互相污染
                 tpl_doc = Document(io.BytesIO(docx_content))
+
+                # 编辑器拖入的字段是内容锁定的 w:sdt 控件（内含 {{字段名}}）。
+                # 先解包成普通 run，保证 docxtpl 走标准段落拼接路径识别占位符。
+                _docx_unwrap_field_controls(tpl_doc)
 
                 # ===== 1) 处理循环块：包裹循环标签 + 准备每行子数据 =====
                 loop_context: dict[str, list[dict]] = {}
