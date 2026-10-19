@@ -75,8 +75,8 @@ const KIND_TITLES: Record<MaterialKind, string> = {
 /** 各类材料需要记忆的样式字段（排除 fieldName/src/icon/text 等标识字段） */
 const STYLE_KEYS: Record<MaterialKind, (keyof IconOption)[]> = {
   table: ['fontFamily', 'fontWeight', 'italic', 'color', 'opacity', 'size'],
-  signature: ['size', 'cornerRadius', 'opacity'],
-  seal: ['size', 'cornerRadius', 'opacity', 'keepRatio'],
+  signature: ['size', 'cornerRadius', 'opacity', 'liveJitter'],
+  seal: ['size', 'cornerRadius', 'opacity', 'keepRatio', 'liveJitter'],
   icon: ['size', 'color', 'opacity'],
   text: ['fontFamily', 'fontWeight', 'italic', 'color', 'opacity', 'size'],
 };

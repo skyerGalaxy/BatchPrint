@@ -52,6 +52,14 @@
             rounded="pill"
           />
           <v-list-item
+            prepend-icon="mdi-history"
+            title="历史记录"
+            value="history"
+            to="/history"
+            class="nav-item"
+            rounded="pill"
+          />
+          <v-list-item
             prepend-icon="mdi-pencil-outline"
             title="手写笔记"
             value="hand-notes"

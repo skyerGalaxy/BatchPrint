@@ -41,6 +41,34 @@ app.add_middleware(
 )
 
 
+def _stable_rng(*parts):
+    """按给定片段生成可复现的伪随机序列，返回 0-1 的函数。"""
+    h = 2166136261
+    for ch in ":".join(str(p) for p in parts):
+        h ^= ord(ch)
+        h = (h * 16777619) & 0xFFFFFFFF
+    state = h or 1
+
+    def nxt():
+        nonlocal state
+        state = (state * 1664525 + 1013904223) & 0xFFFFFFFF
+        return state / 4294967296
+
+    return nxt
+
+
+def ensure_min_pdf_version(writer, reader, minimum=(1, 4)):
+    """输出文件声明的版本不低于 minimum：透明通道与正片叠底需要 PDF 1.4。"""
+    try:
+        header = (reader.pdf_header or "").strip().replace("%PDF-", "")
+        parts = header.split(".")
+        current = (int(parts[0]), int(parts[1]))
+    except Exception:
+        current = (1, 3)
+    if current < minimum:
+        writer.pdf_header = f"%PDF-{minimum[0]}.{minimum[1]}"
+
+
 def register_custom_fonts():
     system_font_map = {
         "微软雅黑": "msyh.ttc",
@@ -525,6 +553,8 @@ async def generate_batch_docx(
     docx_content = await docx_file.read()
     excel_content = await excel_file.read()
     df = pd.read_excel(io.BytesIO(excel_content))
+    # Excel 空单元格会被 pandas 读成 NaN，统一按空白处理，避免填充/渲染出 "nan"
+    df = df.astype(object).where(df.notna(), "")
     headers = df.columns.tolist()
     content = df.values.tolist()
 
@@ -825,6 +855,8 @@ async def generate_batch_pdf(
     
     excel_content = await excel_file.read()
     df = pd.read_excel(io.BytesIO(excel_content))
+    # Excel 空单元格会被 pandas 读成 NaN，统一按空白处理，避免填充/渲染出 "nan"
+    df = df.astype(object).where(df.notna(), "")
     headers = df.columns.tolist()
     content = df.values.tolist()
     
@@ -993,7 +1025,7 @@ async def generate_batch_pdf(
                 pass
         c.drawCentredString(x, y - offset, text)
 
-    def render_icon_to_overlay(overlay_pdf, icon_item, row_data: dict, page_rot: int, crop, pdf_scale: float):
+    def render_icon_to_overlay(overlay_pdf, icon_item, row_data: dict, page_rot: int, crop, pdf_scale: float, row_index: int = 0):
         mode = icon_item.get("mode")
         if mode not in ("single", "conditional"):
             return
@@ -1030,13 +1062,33 @@ async def generate_batch_pdf(
         option = icon_item.get("option", {})
         item_type = option.get("type")
 
+        # 逐份自然随机：仅图片（签字/印章）生效；用行号做种子，保证同一份数据每次导出结果一致
+        jitter_dx = 0.0
+        jitter_dy = 0.0
+        jitter_angle = 0.0
+        jitter_scale = 1.0
+        jitter_opacity = 1.0
+        if item_type == "image":
+            live_jitter = float(option.get("liveJitter", 0) or 0)
+            if live_jitter > 0:
+                amount = min(1.0, live_jitter / 100.0)
+                nxt = _stable_rng(icon_item.get("id", ""), row_index)
+                # 位置 ±0.85mm、角度 ±1.6°、大小 ±1.2%、浓度最多降低 8%
+                jitter_dx = (nxt() - 0.5) * 2 * 2.4 * amount
+                jitter_dy = (nxt() - 0.5) * 2 * 2.4 * amount
+                jitter_angle = (nxt() - 0.5) * 2 * 1.6 * amount
+                jitter_scale = 1 + (nxt() - 0.5) * 2 * 0.012 * amount
+                jitter_opacity = 1 - nxt() * 0.08 * amount
+
         overlay_pdf.saveState()
         overlay_pdf.translate(x, y)
         # 前端 rotation 为屏幕顺时针角度；页面显示时会再顺时针旋转 page_rot，
         # 因此叠加层需预旋转 (page_rot - rotation) 度（ReportLab 逆时针为正）
-        angle = (page_rot - icon_rotation) % 360
+        angle = (page_rot - icon_rotation + jitter_angle) % 360
         if angle:
             overlay_pdf.rotate(angle)
+        if jitter_dx or jitter_dy:
+            overlay_pdf.translate(jitter_dx, jitter_dy)
 
         try:
             if item_type == "field":
@@ -1097,6 +1149,10 @@ async def generate_batch_pdf(
                                 render_width = unit * img_ratio
                                 render_height = unit
 
+                            if jitter_scale != 1.0:
+                                render_width *= jitter_scale
+                                render_height *= jitter_scale
+
                             # 圆角：短边尺寸的百分比，与前端一致
                             corner_radius = float(option.get("cornerRadius", 0) or 0)
                             radius = min(
@@ -1104,7 +1160,7 @@ async def generate_batch_pdf(
                                 render_width / 2,
                                 render_height / 2,
                             )
-                            img_opacity = float(option.get("opacity", 1.0) or 1.0)
+                            img_opacity = float(option.get("opacity", 1.0) or 1.0) * jitter_opacity
 
                             overlay_pdf.saveState()
                             try:
@@ -1117,6 +1173,11 @@ async def generate_batch_pdf(
                                     overlay_pdf.clipPath(clip_path, stroke=0, fill=0)
                                 if img_opacity < 1.0:
                                     overlay_pdf.setFillAlpha(img_opacity)
+                                # 正片叠底模拟油墨叠印：印章压住黑字时仍能看到字迹
+                                try:
+                                    overlay_pdf.setBlendMode("Multiply")
+                                except Exception:
+                                    pass
                                 image_reader = image_reader_cache.get(local_path)
                                 if image_reader is None:
                                     image_reader = ImageReader(img)
@@ -1158,6 +1219,12 @@ async def generate_batch_pdf(
             # ===== 预计算每页静态信息，并区分静态/动态图标 =====
             # 静态：single 且非字段类（签字/印章/图标/文本），渲染结果与行数据无关
             # 动态：字段类（值随行变化）或条件类（显隐随行变化），需逐行处理
+            def _has_live_jitter(icon_item):
+                icon_option = icon_item.get("option", {})
+                if icon_option.get("type") != "image":
+                    return False
+                return float(icon_option.get("liveJitter", 0) or 0) > 0
+
             pages_meta = []
             for page_idx in range(pdf_page_count):
                 src_page = pdf_reader.pages[page_idx]
@@ -1169,7 +1236,9 @@ async def generate_batch_pdf(
                 page_icons = [ic for ic in icon_list_data if ic.get("pageIndex") == page_idx + 1]
                 static_icons = [
                     ic for ic in page_icons
-                    if ic.get("mode") == "single" and ic.get("option", {}).get("type") != "field"
+                    if ic.get("mode") == "single"
+                    and ic.get("option", {}).get("type") != "field"
+                    and not _has_live_jitter(ic)
                 ]
                 static_ids = {id(ic) for ic in static_icons}
                 dynamic_icons = [ic for ic in page_icons if id(ic) not in static_ids]
@@ -1195,6 +1264,7 @@ async def generate_batch_pdf(
             # ===== 1) 静态图标只渲染/合并一次，生成基础 PDF =====
             if any(m["static"] for m in pages_meta):
                 base_writer = PdfWriter()
+                ensure_min_pdf_version(base_writer, pdf_reader)
                 base_writer.append(pdf_reader, import_outline=False)
                 for page_idx, meta in enumerate(pages_meta):
                     if meta["static"]:
@@ -1216,6 +1286,7 @@ async def generate_batch_pdf(
                 row_data = {headers[i]: row[i] for i in range(len(headers))}
 
                 row_writer = PdfWriter()
+                ensure_min_pdf_version(row_writer, base_reader)
                 row_writer.append(base_reader, import_outline=False)
 
                 for page_idx, meta in enumerate(pages_meta):
@@ -1240,7 +1311,7 @@ async def generate_batch_pdf(
                         )
                         for ic in visible
                     )
-                    cache_key = (page_idx, sig)
+                    cache_key = (page_idx, sig, row_idx if any(_has_live_jitter(ic) for ic in visible) else -1)
                     overlay_page = overlay_cache.get(cache_key)
                     if overlay_page is None:
                         # 强制按 single 绘制（显隐已在外部判定），避免重复评估条件
@@ -1249,7 +1320,7 @@ async def generate_batch_pdf(
                         c = canvas.Canvas(buf, pagesize=meta["size"])
                         for icon_item in forced:
                             render_icon_to_overlay(
-                                c, icon_item, row_data, meta["rotation"], meta["crop"], pdf_scale
+                                c, icon_item, row_data, meta["rotation"], meta["crop"], pdf_scale, row_idx
                             )
                         c.save()
                         buf.seek(0)

@@ -111,6 +111,12 @@ const sealKeepRatio = computed({
   set: (v: boolean) => { option.value.keepRatio = v; },
 });
 
+/** 逐份自然随机 0-100（仅导出 PDF 生效） */
+const liveJitterModel = computed({
+  get: () => option.value.liveJitter ?? 0,
+  set: (v: number) => { option.value.liveJitter = v; },
+});
+
 /* ========= 预设图标 ========= */
 const iconGroups = [
   {
@@ -529,6 +535,25 @@ const imagePreviewRadius = computed(() => `${Math.round((PREVIEW_BOX * cornerRad
             />
             <span class="ms-op-value">{{ Math.round(opacityModel * 100) }}%</span>
           </div>
+
+          <div class="ms-row">
+            <v-icon size="15" color="#94a3b8">mdi-shuffle-variant</v-icon>
+            <span class="ms-row-label">自然随机</span>
+            <v-slider
+              v-model.number="liveJitterModel"
+              density="compact"
+              hide-details
+              :min="0"
+              :max="100"
+              :step="5"
+              thumb-size="14"
+              track-size="3"
+              color="primary"
+              class="ms-slider"
+            />
+            <span class="ms-op-value">{{ liveJitterModel }}%</span>
+          </div>
+          <div class="ms-row-tip">仅导出 PDF 生效：每份文件的签字有细微角度、位置与浓度差异</div>
         </div>
       </div>
 
@@ -663,6 +688,25 @@ const imagePreviewRadius = computed(() => `${Math.round((PREVIEW_BOX * cornerRad
             />
             <span class="ms-op-value">{{ Math.round(opacityModel * 100) }}%</span>
           </div>
+
+          <div class="ms-row">
+            <v-icon size="15" color="#94a3b8">mdi-shuffle-variant</v-icon>
+            <span class="ms-row-label">自然随机</span>
+            <v-slider
+              v-model.number="liveJitterModel"
+              density="compact"
+              hide-details
+              :min="0"
+              :max="100"
+              :step="5"
+              thumb-size="14"
+              track-size="3"
+              color="primary"
+              class="ms-slider"
+            />
+            <span class="ms-op-value">{{ liveJitterModel }}%</span>
+          </div>
+          <div class="ms-row-tip">仅导出 PDF 生效：每份文件的印章有细微角度、位置与浓度差异</div>
         </div>
       </div>
 
@@ -1097,6 +1141,13 @@ const imagePreviewRadius = computed(() => `${Math.round((PREVIEW_BOX * cornerRad
   text-align: right;
   flex-shrink: 0;
   font-variant-numeric: tabular-nums;
+}
+
+.ms-row-tip {
+  margin: 2px 0 0 27px;
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: #b0b9c6;
 }
 
 .ms-swatch {

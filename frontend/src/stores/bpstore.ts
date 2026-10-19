@@ -1,9 +1,10 @@
-import { ref } from "vue";
+import { ref, shallowRef } from "vue";
 import { defineStore } from "pinia";
 import {Store} from '@tauri-apps/plugin-store'
 import { mkdir } from "@tauri-apps/plugin-fs";
 import { appLocalDataDir } from '@tauri-apps/api/path';
 import type { StoreIcon, IconOption, MaterialKind, LoopBlock, DocxStructureItem } from '@/types/icon';
+import type { WorkspaceSnapshot } from '@/types/workspace';
 
 interface Pointer {
   pageIndex: number;  
@@ -52,6 +53,14 @@ export const useBPStore = defineStore("bpstore", () => {
   const docxStructure = ref<DocxStructureItem[]>([]);
   const loopBlocks = ref<LoopBlock[]>([]);
 
+  /**
+   * 模板 / 表格的原始文件绝对路径，作为工作进度的唯一持久化引用。
+   * pdfFile / docxFile / excelFile 是由这些路径派生出的临时对象，仅用于预览与上传。
+   */
+  const pdfPath = ref<string>('');
+  const docxPath = ref<string>('');
+  const excelPath = ref<string>('');
+
   /** 各材料类型最近一次确认的样式（不含 fieldName/src/icon/text 等标识字段），新拖入的同类材料沿用 */
   const materialStyles = ref<Record<MaterialKind, Partial<IconOption>>>({
     table: {},
@@ -61,6 +70,51 @@ export const useBPStore = defineStore("bpstore", () => {
     text: {},
   });
   let materialStyleStore: Store | null = null;
+
+  /**
+   * 历史记录页请求恢复的现场快照。
+   * 用 shallowRef 避免把快照里大量嵌套对象/图标数据做成响应式代理。
+   * 由 /batch-print 页面在激活时消费（consumeRestore），恢复环境后再写入各业务字段。
+   */
+  const pendingRestore = shallowRef<WorkspaceSnapshot | null>(null);
+  /** 工作进度列表版本号：保存 / 删除后自增，历史记录页据此刷新 */
+  const workspacesVersion = ref(0);
+
+  /**
+   * 当前正在编辑的项目。
+   * 再次保存时沿用这个 ID，在同一项目里追加版本，而不是每保存一次就新建一个项目。
+   * 为空表示当前内容尚未保存成项目（下次保存会创建新项目）。
+   */
+  const currentProjectId = ref('');
+  const currentProjectTitle = ref('');
+  /** 当前项目的版本数量（含当前版本）；<=1 表示还没有历史版本 */
+  const currentProjectRevisionCount = ref(0);
+
+  function setCurrentProject(id: string, title: string, revisionCount = 0) {
+    currentProjectId.value = id;
+    currentProjectTitle.value = title;
+    currentProjectRevisionCount.value = revisionCount;
+  }
+
+  function clearCurrentProject() {
+    currentProjectId.value = '';
+    currentProjectTitle.value = '';
+    currentProjectRevisionCount.value = 0;
+  }
+
+  function requestRestore(snapshot: WorkspaceSnapshot) {
+    pendingRestore.value = snapshot;
+  }
+
+  function consumeRestore(): WorkspaceSnapshot | null {
+    const snapshot = pendingRestore.value;
+    pendingRestore.value = null;
+    return snapshot;
+  }
+
+  function bumpWorkspaces() {
+    workspacesVersion.value++;
+  }
 
   async function loadMaterialStyles() {
     try {
@@ -203,7 +257,17 @@ export const useBPStore = defineStore("bpstore", () => {
     docxFile,
     docxStructure,
     loopBlocks,
+    pdfPath,
+    docxPath,
+    excelPath,
     materialStyles,
+    pendingRestore,
+    workspacesVersion,
+    currentProjectId,
+    currentProjectTitle,
+    currentProjectRevisionCount,
+    setCurrentProject,
+    clearCurrentProject,
     addRegularPointer,
     addConditionalPointer,
     removePointer,
@@ -211,5 +275,8 @@ export const useBPStore = defineStore("bpstore", () => {
     loadMaterialStyles,
     saveMaterialStyle,
     instantiateOption,
+    requestRestore,
+    consumeRestore,
+    bumpWorkspaces,
   };
 });

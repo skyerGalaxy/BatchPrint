@@ -8,11 +8,23 @@
             <span class="card-title">输入输出设置</span>
             <v-spacer></v-spacer>
             <v-btn
+              v-if="hasAnyPath"
               variant="text"
               color="grey-darken-1"
               size="small"
               rounded="lg"
-              @click="handleReset"
+              :loading="reloading"
+              @click="reloadFromPaths"
+            >
+              <v-icon size="16" class="mr-1">mdi-reload</v-icon>
+              重新加载
+            </v-btn>
+            <v-btn
+              variant="text"
+              color="grey-darken-1"
+              size="small"
+              rounded="lg"
+              @click="requestReset"
             >
               <v-icon size="16" class="mr-1">mdi-refresh</v-icon>
               重置
@@ -22,30 +34,44 @@
           <div class="control-body">
             <div class="section">
               <div class="section-label">模板</div>
-              <v-file-input
-                :key="'tpl-' + resetKey"
-                accept="application/pdf,.pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                prepend-icon="mdi-file-document-outline"
-                label="选择模板（PDF / DOCX）"
+              <v-btn
                 variant="outlined"
-                density="comfortable"
-                hide-details
-                @update:modelValue="handleFileChange"
-              />
+                block
+                rounded="lg"
+                prepend-icon="mdi-file-document-outline"
+                class="pick-file-btn"
+                @click="pickTemplate"
+              >
+                选择模板（PDF / DOCX）
+              </v-btn>
+              <div v-if="templatePath" class="file-picked-hint">
+                <v-icon size="14" color="success">mdi-check-circle-outline</v-icon>
+                <span class="file-picked-name" :title="templatePath">{{ templateFileName }}</span>
+              </div>
+              <div v-if="templatePath" class="file-meta-row">
+                <span>{{ templateMtimeText }}</span>
+              </div>
             </div>
 
             <div class="section">
               <div class="section-label">表格</div>
-              <v-file-input
-                :key="'xls-' + resetKey"
-                accept=".xlsx, .xls"
-                prepend-icon="mdi-file-excel"
-                label="选择 Excel 数据"
+              <v-btn
                 variant="outlined"
-                density="comfortable"
-                hide-details
-                @change="handleExcelChange"
-              />
+                block
+                rounded="lg"
+                prepend-icon="mdi-file-excel"
+                class="pick-file-btn"
+                @click="pickExcel"
+              >
+                选择 Excel 数据
+              </v-btn>
+              <div v-if="excelPath" class="file-picked-hint">
+                <v-icon size="14" color="success">mdi-check-circle-outline</v-icon>
+                <span class="file-picked-name" :title="excelPath">{{ excelFileName }}</span>
+              </div>
+              <div v-if="excelPath" class="file-meta-row">
+                <span>{{ excelMtimeText }}</span>
+              </div>
             </div>
 
             <div class="section field-section">
@@ -169,9 +195,11 @@
                         v-for="preset in textPresets"
                         :key="preset.id"
                         class="text-preset-chip"
-                        :title="`拖动「${preset.text}」到 PDF`"
+                        :title="`点击编辑，或拖动「${preset.text}」到 PDF`"
                         draggable="true"
                         @dragstart="startPresetTextDrag($event, preset)"
+                        @dragend="handlePresetDragEnd"
+                        @click="openPresetEditor(preset)"
                       >
                         <span class="text-preset-label" :style="presetPreviewStyle(preset)">
                           {{ preset.text }}
@@ -185,7 +213,7 @@
                           <v-icon size="12">mdi-close</v-icon>
                         </button>
                       </div>
-                      <button type="button" class="text-preset-add" @click="openTextDialog">
+                      <button type="button" class="text-preset-add" @click="openTextDialog()">
                         <v-icon size="16">mdi-plus</v-icon>
                         <span>添加文本</span>
                       </button>
@@ -405,17 +433,57 @@
               <v-icon size="20" color="primary" class="mr-2">mdi-eye-outline</v-icon>
               <span class="card-title">预览区</span>
             </div>
-            <v-chip
-              v-if="bpStore.templateType === 'pdf' && bpStore.iconList.length > 0"
-              variant="outlined"
-              size="small"
-              color="grey"
-              class="clear-chip"
-              @click="bpStore.iconList = []"
-            >
-              <v-icon start size="12">mdi-delete-outline</v-icon>
-              清空标注 ({{ bpStore.iconList.length }})
-            </v-chip>
+            <div class="d-flex align-center ga-2 preview-actions">
+              <v-chip
+                v-if="bpStore.currentProjectId"
+                variant="tonal"
+                size="small"
+                color="primary"
+                class="project-chip"
+                :title="bpStore.currentProjectTitle"
+              >
+                <v-icon start size="13">mdi-folder-edit-outline</v-icon>
+                <span class="project-chip-name">{{ bpStore.currentProjectTitle }}</span>
+              </v-chip>
+              <v-btn
+                v-if="hasProjectHistory"
+                icon
+                size="small"
+                variant="text"
+                color="primary"
+                class="history-icon-btn"
+                @click="openProjectHistory"
+              >
+                <v-badge :content="bpStore.currentProjectRevisionCount" color="primary" offset-x="-2" offset-y="-2">
+                  <v-icon size="19">mdi-history</v-icon>
+                </v-badge>
+                <v-tooltip activator="parent" location="bottom">查看项目历史</v-tooltip>
+              </v-btn>
+              <v-chip
+                v-if="bpStore.templateType === 'pdf' && bpStore.iconList.length > 0"
+                variant="outlined"
+                size="small"
+                color="grey"
+                class="clear-chip"
+                @click="requestClearIcons"
+              >
+                <v-icon start size="12">mdi-delete-outline</v-icon>
+                清空标注 ({{ bpStore.iconList.length }})
+              </v-chip>
+              <v-btn
+                v-if="hasTemplate"
+                variant="tonal"
+                size="small"
+                color="primary"
+                rounded="lg"
+                class="save-progress-btn"
+                :disabled="!canSaveProgress"
+                @click="openSaveDialog"
+              >
+                <v-icon start size="14">mdi-content-save-outline</v-icon>
+                {{ canSaveProgress ? '保存工作进度' : '暂无改动' }}
+              </v-btn>
+            </div>
           </div>
 
           <div class="preview-surface">
@@ -487,6 +555,28 @@
       </v-card>
     </v-dialog>
 
+    <v-dialog v-model="invalidFieldsDialog" max-width="480">
+      <v-card>
+        <v-card-item>
+          <v-card-title class="text-warning">
+            <v-icon color="warning" class="mr-2">mdi-alert</v-icon>
+            字段已失效
+          </v-card-title>
+        </v-card-item>
+        <v-card-text>
+          <p>当前表格中已找不到以下字段，引用它们的材料或条件不会正确渲染：</p>
+          <ul class="invalid-field-list">
+            <li v-for="field in missingFieldNames" :key="field">{{ field }}</li>
+          </ul>
+          <p class="mt-2">请在表格中恢复这些列，或改用现有字段重新放置材料。</p>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer></v-spacer>
+          <v-btn color="primary" @click="invalidFieldsDialog = false">知道了</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
     <v-dialog v-model="excelErrorDialog" max-width="440">
       <v-card>
         <v-card-item>
@@ -510,7 +600,7 @@
       <v-card class="text-dialog-card" rounded="xl" elevation="8">
         <v-card-item class="text-dialog-header">
           <v-icon color="#be185d" size="20" class="mr-2">mdi-format-text</v-icon>
-          <v-card-title class="text-dialog-title">添加文本预设</v-card-title>
+          <v-card-title class="text-dialog-title">{{ editingPresetId ? '编辑文本预设' : '添加文本预设' }}</v-card-title>
         </v-card-item>
 
         <v-card-text class="text-dialog-body">
@@ -614,7 +704,7 @@
             color="#be185d"
             :disabled="!textForm.text.trim()"
             @click="saveTextPreset"
-          >保存预设</v-btn>
+          >{{ editingPresetId ? '保存修改' : '保存预设' }}</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
@@ -623,9 +713,18 @@
     <input
       ref="imageFileInput"
       type="file"
-      accept="image/*"
+      accept=".png,.jpg,.jpeg,.webp,.bmp"
       class="hidden-file-input"
       @change="handleImageSelect"
+    />
+
+    <!-- 签字 / 印章图片处理：去底色 + 自动裁切 + 透明 PNG -->
+    <ImageProcessDialog
+      v-model="imageProcessDialog"
+      :file="pendingImage?.file ?? null"
+      :kind="pendingImage?.kind ?? 'signature'"
+      :saving="savingImage"
+      @confirm="confirmProcessedImage"
     />
 
     <!-- 签字 / 印章图片右键删除菜单 -->
@@ -763,23 +862,145 @@
         </v-card-actions>
       </v-card>
     </v-dialog>
+
+    <!-- 保存工作进度 -->
+    <v-dialog v-model="saveDialog" max-width="460">
+      <v-card rounded="xl" elevation="8">
+        <v-card-item>
+          <div class="d-flex align-center">
+            <v-icon color="primary" size="24" class="mr-2">mdi-content-save-outline</v-icon>
+            <v-card-title class="pa-0">保存工作进度</v-card-title>
+          </div>
+          <v-card-subtitle class="pa-0 mt-1">
+            {{ bpStore.currentProjectId
+              ? '将作为新版本保存到当前项目，之前的进度会保留在项目历史中'
+              : '首次保存会创建一个项目，之后再次保存都会追加到同一个项目' }}
+          </v-card-subtitle>
+        </v-card-item>
+
+        <v-card-text class="pt-4">
+          <v-text-field
+            v-model="saveTitle"
+            label="记录名称"
+            density="compact"
+            variant="outlined"
+            hide-details
+            autofocus
+            @keyup.enter="persistProgress()"
+          />
+
+          <div class="save-summary mt-3">
+            <div class="save-summary-row">
+              <v-icon size="14">mdi-file-document-outline</v-icon>
+              <span>{{ templateFileName || '未选择模板' }}</span>
+            </div>
+            <div class="save-summary-row">
+              <v-icon size="14">mdi-file-excel</v-icon>
+              <span>{{ excelFileName || '未选择表格' }}</span>
+            </div>
+            <div v-if="bpStore.templateType === 'pdf'" class="save-summary-row">
+              <v-icon size="14">mdi-tag-multiple-outline</v-icon>
+              <span>{{ bpStore.iconList.length }} 个标注</span>
+            </div>
+            <div v-else class="save-summary-row">
+              <v-icon size="14">mdi-repeat</v-icon>
+              <span>{{ bpStore.loopBlocks.length }} 个循环块</span>
+            </div>
+          </div>
+        </v-card-text>
+
+        <v-card-actions>
+          <v-btn variant="text" rounded="lg" :disabled="savingProgress" @click="persistProgress({ exportAfter: true })">
+            <v-icon start size="16">mdi-download-outline</v-icon>
+            导出 JSON
+          </v-btn>
+          <v-spacer />
+          <v-btn variant="text" rounded="lg" :disabled="savingProgress" @click="saveDialog = false">取消</v-btn>
+          <v-btn
+            variant="flat"
+            rounded="lg"
+            color="primary"
+            :loading="savingProgress"
+            :disabled="savingProgress"
+            @click="persistProgress()"
+          >保存</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- 当前项目的历史版本 -->
+    <WorkspaceHistoryDialog
+      v-model="historyDialog"
+      :data-path="bpStore.dataPath"
+      :project-id="bpStore.currentProjectId"
+      :project-title="bpStore.currentProjectTitle"
+      :restoring-key="restoringRevisionKey"
+      @restore="restoreRevision"
+    />
+
+    <v-snackbar v-model="progressSnackbar" :timeout="3200" location="bottom" rounded="lg">
+      {{ progressMessage }}
+      <template #actions>
+        <v-btn v-if="hasProjectHistory" variant="text" size="small" @click="openProjectHistoryFromSnackbar">项目历史</v-btn>
+        <v-btn variant="text" size="small" @click="goHistory">全部记录</v-btn>
+        <v-btn variant="text" size="small" @click="progressSnackbar = false">关闭</v-btn>
+      </template>
+    </v-snackbar>
+
+    <!-- 重置 / 清空标注等破坏性操作的确认框 -->
+    <v-dialog
+      :model-value="confirmKind !== null"
+      max-width="420"
+      @update:model-value="onConfirmDialogToggle"
+    >
+      <v-card v-if="confirmConfig" rounded="xl" elevation="8">
+        <v-card-item>
+          <div class="d-flex align-center">
+            <v-icon color="error" size="22" class="mr-2">mdi-alert-circle-outline</v-icon>
+            <v-card-title class="pa-0 confirm-title">{{ confirmConfig.title }}</v-card-title>
+          </div>
+        </v-card-item>
+        <v-card-text class="confirm-text">{{ confirmConfig.message }}</v-card-text>
+        <v-card-actions class="px-4 pb-3">
+          <v-spacer />
+          <v-btn variant="text" rounded="lg" @click="confirmKind = null">取消</v-btn>
+          <v-btn color="error" variant="flat" rounded="lg" @click="confirmAction">
+            {{ confirmConfig.confirmText }}
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </v-container>
 </template>
 
 <script setup lang="ts">
 import axios from 'axios'
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onActivated, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { invoke, convertFileSrc } from '@tauri-apps/api/core'
-import { readDir, exists, writeFile, mkdir, remove } from '@tauri-apps/plugin-fs'
+import { readDir, exists, writeFile, mkdir, remove, stat } from '@tauri-apps/plugin-fs'
+import { open as openFileDialog } from '@tauri-apps/plugin-dialog'
 import { Store } from '@tauri-apps/plugin-store'
 import PdfViewer from '@/components/pdfview/PdfViewer.vue'
 import DocxViewer from '@/components/docxview/DocxViewer.vue'
+import WorkspaceHistoryDialog from '@/components/WorkspaceHistoryDialog.vue'
+import ImageProcessDialog from '@/components/ImageProcessDialog.vue'
 import { useBPStore } from '@/stores/bpstore'
 import type { IconOption, LoopBlock, Condition } from '@/types/icon'
+import type { ImageProcessKind } from '@/utils/imageProcess'
+import type { NamePart, WorkspaceSnapshot } from '@/types/workspace'
+import {
+  exportWorkspaceJson,
+  listWorkspaceRevisions,
+  readPathAsFile,
+  revisionKey,
+  saveWorkspace,
+} from '@/utils/workspace'
 import { getFontsList, loadCustomFonts } from '@/utils/fontLoader'
 
 const pdfSrc = ref<string>('')
 const bpStore = useBPStore()
+const router = useRouter()
 const docxViewerRef = ref<InstanceType<typeof DocxViewer> | null>(null)
 
 const activeMaterialNav = ref('table')
@@ -910,6 +1131,10 @@ const textPresets = ref<TextPreset[]>([])
 const textDialogOpen = ref(false)
 const textColorMenu = ref(false)
 const fontOptions = ref<FontOption[]>([])
+/** 正在编辑的预设 id；为空表示「新增」模式 */
+const editingPresetId = ref<string | null>(null)
+/** 拖拽刚结束时浏览器可能补发一次 click，用时间戳短暂屏蔽，避免误开编辑窗口 */
+let suppressPresetClickUntil = 0
 
 function createEmptyTextForm(): TextPreset {
   return {
@@ -931,18 +1156,38 @@ function genPresetId(): string {
   return `tp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
 }
 
-function openTextDialog() {
-  textForm.value = createEmptyTextForm()
+/** 打开文本弹窗：传入 preset 为编辑已有预设，缺省为新增 */
+function openTextDialog(preset?: TextPreset) {
+  editingPresetId.value = preset ? preset.id : null
+  textForm.value = preset ? { ...preset } : createEmptyTextForm()
   textColorMenu.value = false
   textDialogOpen.value = true
+}
+
+/** 拖拽结束后短暂屏蔽随后的 click，避免「拖出去」被当成「点击编辑」 */
+function handlePresetDragEnd() {
+  suppressPresetClickUntil = Date.now() + 200
+}
+
+/** 点击预设 chip：打开编辑窗口 */
+function openPresetEditor(preset: TextPreset) {
+  if (Date.now() < suppressPresetClickUntil) return
+  openTextDialog(preset)
 }
 
 async function saveTextPreset() {
   const text = textForm.value.text.trim()
   if (!text) return
-  textPresets.value.push({ ...textForm.value, id: genPresetId(), text })
+  const editingId = editingPresetId.value
+  const index = editingId ? textPresets.value.findIndex(p => p.id === editingId) : -1
+  if (index >= 0) {
+    textPresets.value.splice(index, 1, { ...textForm.value, id: editingId as string, text })
+  } else {
+    textPresets.value.push({ ...textForm.value, id: genPresetId(), text })
+  }
   await persistTextPresets()
   textDialogOpen.value = false
+  editingPresetId.value = null
 }
 
 async function deleteTextPreset(id: string) {
@@ -1046,6 +1291,10 @@ async function refreshImageLists() {
 /* ========= 添加签字 / 印章图片 ========= */
 const imagePickerKind = ref<'signature' | 'seal'>('signature')
 const imageFileInput = ref<HTMLInputElement | null>(null)
+/** 待处理的上传文件：选图后先进入处理对话框，确认后才写入磁盘 */
+const pendingImage = ref<{ file: File; kind: ImageProcessKind } | null>(null)
+const imageProcessDialog = ref(false)
+const savingImage = ref(false)
 
 function triggerImagePicker(kind: 'signature' | 'seal') {
   if (!bpStore.dataPath) return
@@ -1053,25 +1302,66 @@ function triggerImagePicker(kind: 'signature' | 'seal') {
   imageFileInput.value?.click()
 }
 
-async function handleImageSelect(event: Event) {
+function handleImageSelect(event: Event) {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
+  // 先清空 input，保证连续选择同一张图片时也能触发 change
+  input.value = ''
   if (!file) return
-  const kind = imagePickerKind.value
-  const subDir = kind === 'signature' ? 'signImg' : 'sealImg'
+  if (!bpStore.dataPath) {
+    alert('请先设置数据目录')
+    return
+  }
+  pendingImage.value = { file, kind: imagePickerKind.value }
+  imageProcessDialog.value = true
+}
+
+function timestampStamp(date: Date): string {
+  const pad = (n: number, len = 2) => String(n).padStart(len, '0')
+  return [
+    date.getFullYear(),
+    pad(date.getMonth() + 1),
+    pad(date.getDate()),
+    '-',
+    pad(date.getHours()),
+    pad(date.getMinutes()),
+    pad(date.getSeconds()),
+    '-',
+    pad(date.getMilliseconds(), 3),
+  ].join('')
+}
+
+async function confirmProcessedImage(payload: { blob: Blob; ext: string; original: boolean }) {
+  const pending = pendingImage.value
+  if (!pending || !bpStore.dataPath || savingImage.value) return
+  const subDir = pending.kind === 'signature' ? 'signImg' : 'sealImg'
   const dirPath = `${bpStore.dataPath}/${subDir}`
+  // 原图单独归档，避免被图片列表扫描到（readDir 只取顶层文件）
+  const originalDir = `${dirPath}/.originals`
+  savingImage.value = true
   try {
     if (!await exists(dirPath)) {
       await mkdir(dirPath, { recursive: true })
     }
-    const buf = await file.arrayBuffer()
-    await writeFile(`${dirPath}/${file.name}`, new Uint8Array(buf))
+    // 文件名全 ASCII + 时间戳：避免同名覆盖导致图片缓存命中旧图
+    const base = pending.kind === 'signature' ? 'sig' : 'seal'
+    const fileName = `${base}-${timestampStamp(new Date())}.${payload.ext}`
+    if (!payload.original) {
+      if (!await exists(originalDir)) {
+        await mkdir(originalDir, { recursive: true })
+      }
+      const originalBuf = await pending.file.arrayBuffer()
+      await writeFile(`${originalDir}/${fileName}`, new Uint8Array(originalBuf))
+    }
+    const buf = await payload.blob.arrayBuffer()
+    await writeFile(`${dirPath}/${fileName}`, new Uint8Array(buf))
     await refreshImageLists()
+    imageProcessDialog.value = false
   } catch (error) {
     console.error('添加图片失败:', error)
     alert('添加图片失败，请检查路径权限')
   } finally {
-    input.value = ''
+    savingImage.value = false
   }
 }
 
@@ -1124,7 +1414,13 @@ async function deleteImage() {
 const mergedCellsDialog = ref(false)
 const excelErrorDialog = ref(false)
 const excelErrorMessage = ref('')
-const resetKey = ref(0)
+const invalidFieldsDialog = ref(false)
+const missingFieldNames = ref<string[]>([])
+
+/** 模板 / 表格文件的最后修改时间（毫秒），用于提示磁盘文件是否已被外部改动 */
+const templateMtime = ref<number | null>(null)
+const excelMtime = ref<number | null>(null)
+const reloading = ref(false)
 
 const generating = ref(false)
 const generateProgress = ref(0)
@@ -1148,14 +1444,6 @@ const loopBlockForm = ref({
   conditions: [] as Condition[],
   matchMode: '所有' as '所有' | '任一',
 })
-
-interface NamePart {
-  type: 'field' | 'seq' | 'text' | 'sep'
-  field?: string
-  start?: number
-  digits?: number
-  text?: string
-}
 
 const nameParts = ref<NamePart[]>([])
 const addMenuOpen = ref(false)
@@ -1319,6 +1607,14 @@ onMounted(async () => {
     refreshImageLists(),
     bpStore.loadMaterialStyles(),
   ])
+  // 首次进入本页时也可能带着历史记录（例如从 /history 直达）
+  await applyPendingRestore()
+})
+
+// 本页被 keep-alive 缓存：从历史记录页返回时走 onActivated，
+// 此时 DOM 已重新挂载，恢复后 PdfViewer 才能正常渲染
+onActivated(async () => {
+  await applyPendingRestore()
 })
 
 watch(() => bpStore.dataPath, async (newPath) => {
@@ -1333,34 +1629,266 @@ watch(() => bpStore.fontsVersion, () => {
   loadFonts()
 })
 
-const handleFileChange = async (value: File | File[] | null) => {
-  const file = Array.isArray(value) ? value[0] : value
-  if (!file) return
+/* ========= 模板 / 表格：以路径为唯一持久化引用 ========= */
 
-  // 根据上传文件自动识别模板类型
-  const name = file.name.toLowerCase()
-  const isPdf = file.type === 'application/pdf' || name.endsWith('.pdf')
-  const isDocx = file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || name.endsWith('.docx')
+/**
+ * 最近一次由编辑器 `save()` 写回磁盘的 DOCX 字节。
+ * 只在「保存工作进度」回写成功后更新，因此它一定是编辑器自身的序列化结果——
+ * 用它做基线比较不会因为「重新序列化的字节差异」误报未保存改动。
+ * 为空表示本次会话还没有回写过（无法判断），此时生成不做提示。
+ */
+let docxDiskBytes: Uint8Array | null = null
+
+/** 取路径最后一段作为展示文件名 */
+function basename(path: string): string {
+  return path ? path.split(/[/\\]/).pop() || path : ''
+}
+
+/** 释放不再使用的 blob URL，避免预览切换时内存泄漏 */
+function releaseObjectUrl(url: string) {
+  if (url && url.startsWith('blob:')) URL.revokeObjectURL(url)
+}
+
+/** 读取文件最后修改时间（毫秒）；读不到时返回 null */
+async function readMtime(path: string): Promise<number | null> {
+  if (!path) return null
+  try {
+    const info = await stat(path)
+    return info.mtime ? info.mtime.getTime() : null
+  } catch {
+    return null
+  }
+}
+
+function formatMtime(mtime: number | null): string {
+  if (!mtime) return '修改时间：未知'
+  const d = new Date(mtime)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `修改时间：${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+/** 当前模板（PDF / DOCX）的原始文件路径 */
+const templatePath = computed(() => (bpStore.templateType === 'pdf' ? bpStore.pdfPath : bpStore.docxPath))
+const excelPath = computed(() => bpStore.excelPath)
+const templateFileName = computed(() => basename(templatePath.value))
+const excelFileName = computed(() => basename(bpStore.excelPath))
+const hasTemplate = computed(() => !!templatePath.value)
+const hasAnyPath = computed(() => !!templatePath.value || !!bpStore.excelPath)
+/** 项目存在历史版本（除当前版本外还有旧版本）时，才在预览区显示历史图标 */
+const hasProjectHistory = computed(() => bpStore.currentProjectRevisionCount > 1)
+const templateMtimeText = computed(() => formatMtime(templateMtime.value))
+const excelMtimeText = computed(() => formatMtime(excelMtime.value))
+
+/** 刷新当前项目的版本数量（用于决定是否显示历史图标） */
+async function refreshProjectRevisionCount() {
+  if (!bpStore.currentProjectId || !bpStore.dataPath) {
+    bpStore.currentProjectRevisionCount = 0
+    return
+  }
+  try {
+    const revisions = await listWorkspaceRevisions(bpStore.dataPath, bpStore.currentProjectId)
+    bpStore.currentProjectRevisionCount = revisions.length
+  } catch (error) {
+    console.warn('读取项目版本数量失败:', error)
+    bpStore.currentProjectRevisionCount = 0
+  }
+}
+
+async function refreshTemplateMtime() {
+  templateMtime.value = await readMtime(templatePath.value)
+}
+
+async function refreshExcelMtime() {
+  excelMtime.value = await readMtime(bpStore.excelPath)
+}
+
+async function pickTemplate() {
+  try {
+    const selected = await openFileDialog({
+      multiple: false,
+      directory: false,
+      title: '选择模板（PDF / DOCX）',
+      filters: [{ name: '模板文件', extensions: ['pdf', 'docx'] }],
+    })
+    if (!selected || Array.isArray(selected)) return
+    // 换了不同的模板/表格文件，视为一份新的内容：解除当前项目关联，下次保存创建新项目
+    const currentTemplate = bpStore.templateType === 'pdf' ? bpStore.pdfPath : bpStore.docxPath
+    if (bpStore.currentProjectId && selected !== currentTemplate) bpStore.clearCurrentProject()
+    await loadTemplateFromPath(selected)
+  } catch (error) {
+    console.error('选择模板失败:', error)
+    notifyProgress(`选择模板失败：${(error as Error)?.message || '未知错误'}`)
+  }
+}
+
+async function pickExcel() {
+  try {
+    const selected = await openFileDialog({
+      multiple: false,
+      directory: false,
+      title: '选择 Excel 数据',
+      filters: [{ name: 'Excel 数据', extensions: ['xlsx', 'xls'] }],
+    })
+    if (!selected || Array.isArray(selected)) return
+    if (bpStore.currentProjectId && selected !== bpStore.excelPath) bpStore.clearCurrentProject()
+    await loadExcelFromPath(selected)
+    validateFieldReferences()
+  } catch (error) {
+    console.error('选择 Excel 失败:', error)
+    notifyProgress(`选择 Excel 失败：${(error as Error)?.message || '未知错误'}`)
+  }
+}
+
+/**
+ * 按路径装载模板：识别类型、读取预览字节并解析 DOCX 结构。
+ * 选择新模板时（默认）会清空标注，避免不同模板之间互相污染；
+ * keepAnnotations=true 用于「重新加载」，保留当前标注。
+ */
+async function loadTemplateFromPath(path: string, options: { keepAnnotations?: boolean } = {}) {
+  const file = await readPathAsFile(path)
+  if (!file) {
+    notifyProgress('模板文件不存在或无法读取')
+    return
+  }
+
+  const lower = file.name.toLowerCase()
+  const isPdf = lower.endsWith('.pdf')
+  const isDocx = lower.endsWith('.docx')
+  if (!isPdf && !isDocx) {
+    alert('请选择有效的 PDF 或 DOCX 模板文件')
+    return
+  }
+
+  const keep = options.keepAnnotations === true
+  docxDiskBytes = null
 
   if (isPdf) {
     bpStore.templateType = 'pdf'
-    bpStore.iconList = []
-    pdfSrc.value = URL.createObjectURL(file)
-    bpStore.pdfSrc = pdfSrc.value
-    bpStore.pdfFile = file
+    if (!keep) {
+      bpStore.iconList = []
+      bpStore.loopBlocks = []
+      bpStore.docxStructure = []
+    }
     bpStore.docxFile = null
-    bpStore.docxStructure = []
-    bpStore.loopBlocks = []
-  } else if (isDocx) {
-    bpStore.templateType = 'docx'
-    bpStore.iconList = []
-    bpStore.pdfFile = null
-    bpStore.pdfSrc = ''
-    pdfSrc.value = ''
-    bpStore.docxFile = file
-    await parseDocxStructure(file)
+    bpStore.docxPath = ''
+    releaseObjectUrl(pdfSrc.value)
+    const url = URL.createObjectURL(file)
+    pdfSrc.value = url
+    bpStore.pdfSrc = url
+    bpStore.pdfFile = file
+    bpStore.pdfPath = path
   } else {
-    alert('请选择有效的 PDF 或 DOCX 模板文件')
+    bpStore.templateType = 'docx'
+    if (!keep) bpStore.iconList = []
+    bpStore.pdfFile = null
+    bpStore.pdfPath = ''
+    releaseObjectUrl(pdfSrc.value)
+    pdfSrc.value = ''
+    bpStore.pdfSrc = ''
+    bpStore.docxFile = file
+    bpStore.docxPath = path
+    await parseDocxStructure(file)
+  }
+
+  // 换模板（不保留旧标注）视为全新的材料列表，保存按钮回到「暂无改动」
+  if (!keep) savedProgressSignature.value = progressSignature()
+
+  await refreshTemplateMtime()
+}
+
+/** 按路径装载 Excel 并重新解析字段；引用失效由 validateFieldReferences 统一校验 */
+async function loadExcelFromPath(path: string) {
+  const file = await readPathAsFile(path)
+  if (!file) {
+    notifyProgress('表格文件不存在或无法读取')
+    return
+  }
+
+  const lower = file.name.toLowerCase()
+  if (!lower.endsWith('.xlsx') && !lower.endsWith('.xls')) {
+    alert('请选择有效的Excel文件')
+    return
+  }
+
+  bpStore.excelFile = file
+  bpStore.excelPath = path
+  releaseObjectUrl(bpStore.excelSrc)
+  bpStore.excelSrc = URL.createObjectURL(file)
+  bpStore.fieldNames = []
+  bpStore.excelContent = []
+
+  const formData = new FormData()
+  formData.append('file', file)
+  try {
+    const res = await apiPost('http://localhost:8000/get_excel_headers', formData)
+    if (res.data.has_merged_cells) {
+      mergedCellsDialog.value = true
+    } else {
+      bpStore.fieldNames = res.data.headers
+      bpStore.excelContent = res.data.content
+    }
+  } catch (e: any) {
+    excelErrorMessage.value = e.message || '无法解析 Excel 文件，请检查后端服务是否正常'
+    excelErrorDialog.value = true
+  }
+
+  await refreshExcelMtime()
+}
+
+/**
+ * Excel（重新）解析后校验各处引用的字段是否仍然存在：
+ * - 文件名片段里失效的字段会被剔除（沿用原有行为）
+ * - 材料 / 循环条件里引用的失效字段不静默保留，弹窗交由用户确认
+ */
+function validateFieldReferences() {
+  if (bpStore.fieldNames.length === 0) return
+  const present = new Set(bpStore.fieldNames)
+  const missing = new Set<string>()
+  const add = (field?: string | null) => {
+    if (field && !present.has(field)) missing.add(field)
+  }
+
+  for (const icon of bpStore.iconList) {
+    if (icon.option?.type === 'field') add(icon.option.fieldName)
+    icon.conditions?.forEach(c => add(c.field))
+    icon.groups?.forEach(g => g.conditions.forEach(c => add(c.field)))
+  }
+  for (const block of bpStore.loopBlocks) {
+    block.conditions?.forEach(c => add(c.field))
+  }
+
+  nameParts.value = nameParts.value.filter(p => p.type !== 'field' || present.has(p.field || ''))
+  insertIndex.value = Math.min(insertIndex.value, nameParts.value.length)
+  normalizeSeps()
+
+  missingFieldNames.value = [...missing]
+  if (missingFieldNames.value.length > 0) invalidFieldsDialog.value = true
+}
+
+/** 按当前记录的路径重新读取模板与表格，用于原文件被外部改动后同步 */
+async function reloadFromPaths() {
+  const tplPath = templatePath.value
+  if (!tplPath && !bpStore.excelPath) {
+    notifyProgress('尚未选择模板或表格')
+    return
+  }
+
+  if (bpStore.templateType === 'docx' && tplPath) {
+    const ok = window.confirm('重新加载会用磁盘上的模板文件覆盖编辑器当前内容，未写回的改动将丢失。是否继续？')
+    if (!ok) return
+  }
+
+  reloading.value = true
+  try {
+    if (tplPath) await loadTemplateFromPath(tplPath, { keepAnnotations: true })
+    if (bpStore.excelPath) await loadExcelFromPath(bpStore.excelPath)
+    validateFieldReferences()
+    notifyProgress('已按磁盘文件重新加载')
+  } catch (error) {
+    console.error('重新加载失败:', error)
+    notifyProgress(`重新加载失败：${(error as Error)?.message || '未知错误'}`)
+  } finally {
+    reloading.value = false
   }
 }
 
@@ -1378,45 +1906,6 @@ const parseDocxStructure = async (file: File) => {
   } catch (e: any) {
     alert('解析 DOCX 失败: ' + (e.message || '未知错误'))
     bpStore.docxStructure = []
-  }
-}
-
-const handleExcelChange = async (event: Event) => {
-  const fileInput = event.target as HTMLInputElement
-  const file = fileInput.files ? fileInput.files[0] : null
-
-  bpStore.excelSrc = file ? URL.createObjectURL(file) : ''
-  bpStore.excelFile = file
-  bpStore.fieldNames = []
-  bpStore.excelContent = []
-
-  if (
-    file &&
-    (file.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
-      file.type === 'application/vnd.ms-excel')
-  ) {
-    const formData = new FormData()
-    formData.append('file', file)
-
-    try {
-      const res = await apiPost('http://localhost:8000/get_excel_headers', formData)
-      if (res.data.has_merged_cells) {
-        mergedCellsDialog.value = true
-      } else {
-        bpStore.fieldNames = res.data.headers
-        bpStore.excelContent = res.data.content
-        nameParts.value = nameParts.value.filter(
-          p => p.type !== 'field' || bpStore.fieldNames.includes(p.field || '')
-        )
-        insertIndex.value = Math.min(insertIndex.value, nameParts.value.length)
-        normalizeSeps()
-      }
-    } catch (e: any) {
-      excelErrorMessage.value = e.message || '无法解析 Excel 文件，请检查后端服务是否正常'
-      excelErrorDialog.value = true
-    }
-  } else if (file) {
-    alert('请选择有效的Excel文件')
   }
 }
 
@@ -1475,6 +1964,12 @@ const generateBatchPDF = async () => {
       // 上传编辑器内最新的 DOCX 内容（包含用户在文档中的自由编辑），保存失败时回退原文件
       const editedBuf: ArrayBuffer | null = await docxViewerRef.value?.getDocxArrayBuffer?.() ?? null
       const originalFile = bpStore.docxFile!
+      // 编辑器内容与最近一次写回磁盘的内容不一致时，仅提示、不自动回写，
+      // 让用户知道本次生成用的是编辑器内的最新内容。
+      if (editedBuf && docxDiskBytes !== null && !bytesEqual(new Uint8Array(editedBuf), docxDiskBytes)) {
+        const proceed = window.confirm('编辑器中有尚未写回模板原文件的改动，本次生成会使用编辑器内的最新内容（不会写回原文件）。是否继续？')
+        if (!proceed) return
+      }
       const uploadFile = editedBuf
         ? new File([editedBuf], originalFile.name, {
             type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -1545,22 +2040,334 @@ async function openFolder(path: string) {
 }
 
 const handleReset = () => {
+  releaseObjectUrl(pdfSrc.value)
   pdfSrc.value = ''
   bpStore.pdfSrc = ''
   bpStore.pdfFile = null
+  bpStore.pdfPath = ''
+  releaseObjectUrl(bpStore.excelSrc)
   bpStore.excelSrc = ''
   bpStore.excelFile = null
+  bpStore.excelPath = ''
   bpStore.fieldNames = []
   bpStore.excelContent = []
   bpStore.iconList = []
   bpStore.templateType = 'pdf'
   bpStore.docxFile = null
+  bpStore.docxPath = ''
   bpStore.docxStructure = []
   bpStore.loopBlocks = []
   nameParts.value = []
   customText.value = ''
   insertIndex.value = 0
-  resetKey.value++
+  templateMtime.value = null
+  excelMtime.value = null
+  docxDiskBytes = null
+  // 重置后视为一份全新的内容，下次保存创建新项目（不覆盖已有项目）
+  bpStore.clearCurrentProject()
+  // 材料被清空，保存按钮回到「暂无改动」状态
+  savedProgressSignature.value = progressSignature()
+}
+
+/* ===== 重置 / 清空标注：先弹确认框，避免误触 ===== */
+const confirmKind = ref<'reset' | 'clearIcons' | null>(null)
+
+const confirmConfig = computed(() => {
+  if (confirmKind.value === 'reset') {
+    return {
+      title: '确定重置当前内容？',
+      message: '将清空模板、表格、材料、循环块与文件名规则，并解除与当前项目的关联。此操作不可撤销。',
+      confirmText: '确定重置',
+    }
+  }
+  if (confirmKind.value === 'clearIcons') {
+    return {
+      title: '确定清空全部标注？',
+      message: `将移除当前 ${bpStore.iconList.length} 个标注，未保存的改动会丢失。此操作不可撤销。`,
+      confirmText: '确定清空',
+    }
+  }
+  return null
+})
+
+/** 重置：没有任何内容时不弹框，直接忽略 */
+function requestReset() {
+  const hasContent = hasAnyPath.value || bpStore.iconList.length > 0 || nameParts.value.length > 0
+  if (!hasContent) {
+    notifyProgress('当前没有可重置的内容')
+    return
+  }
+  confirmKind.value = 'reset'
+}
+
+/** 清空标注：没有标注时不弹框 */
+function requestClearIcons() {
+  if (bpStore.iconList.length === 0) return
+  confirmKind.value = 'clearIcons'
+}
+
+function onConfirmDialogToggle(value: boolean) {
+  if (!value) confirmKind.value = null
+}
+
+function confirmAction() {
+  const kind = confirmKind.value
+  confirmKind.value = null
+  if (kind === 'reset') handleReset()
+  else if (kind === 'clearIcons') bpStore.iconList = []
+}
+
+/* ========= 工作进度：保存 / 恢复 ========= */
+const saveDialog = ref(false)
+const savingProgress = ref(false)
+const saveTitle = ref('')
+const historyDialog = ref(false)
+const restoringRevisionKey = ref('')
+const progressSnackbar = ref(false)
+const progressMessage = ref('')
+
+/**
+ * 当前编辑内容的签名，用于判断「保存工作进度」是否有新改动。
+ * 以材料（iconList）为核心，同时带上会写进快照的其它状态，
+ * 避免只换了模板/表格或文件名规则时被误判为“没有改动”。
+ */
+function progressSignature(): string {
+  return JSON.stringify({
+    templateType: bpStore.templateType,
+    templatePath: templatePath.value,
+    excelPath: bpStore.excelPath,
+    pdfScale: bpStore.pdfScale,
+    iconList: bpStore.iconList,
+    loopBlocks: bpStore.loopBlocks,
+    nameParts: nameParts.value,
+  })
+}
+
+/** 最近一次保存 / 恢复时的签名基线 */
+const savedProgressSignature = ref(progressSignature())
+
+/**
+ * 是否可以保存：
+ * - PDF：内容有变化（材料等）才能保存，没改动时按钮不可用；
+ * - DOCX：正文改动只在保存时从编辑器取，无法在此判断，保持可用。
+ */
+const canSaveProgress = computed(() => {
+  if (!hasTemplate.value) return false
+  if (bpStore.templateType === 'docx') return true
+  return progressSignature() !== savedProgressSignature.value
+})
+
+function notifyProgress(message: string) {
+  progressMessage.value = message
+  progressSnackbar.value = true
+}
+
+function goHistory() {
+  progressSnackbar.value = false
+  router.push('/history')
+}
+
+function defaultSaveTitle(): string {
+  // 项目名称保持稳定，不再附带时间戳；每次保存的时间在项目历史里体现
+  return templateFileName.value.replace(/\.[^.]+$/, '') || '未命名项目'
+}
+
+function openSaveDialog() {
+  if (!hasTemplate.value) {
+    notifyProgress('请先选择模板文件')
+    return
+  }
+  if (!canSaveProgress.value) {
+    notifyProgress('材料没有变化，无需保存')
+    return
+  }
+  if (!bpStore.excelFile) {
+    notifyProgress('请先选择 Excel 数据文件')
+    return
+  }
+  // 已有项目时沿用它的名称，避免每次保存都被默认时间戳覆盖
+  saveTitle.value = bpStore.currentProjectTitle || defaultSaveTitle()
+  saveDialog.value = true
+}
+
+function openProjectHistory() {
+  if (!bpStore.currentProjectId) {
+    notifyProgress('当前内容还没有保存成项目')
+    return
+  }
+  historyDialog.value = true
+}
+
+function openProjectHistoryFromSnackbar() {
+  progressSnackbar.value = false
+  openProjectHistory()
+}
+
+/** 深拷贝，避免把 Pinia 的响应式代理写进 JSON 快照 */
+function clonePlain<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T
+}
+
+/** 逐字节比较，用于判断编辑器内的 DOCX 是否已写回磁盘 */
+function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false
+  }
+  return true
+}
+
+async function persistProgress(options: { exportAfter?: boolean } = {}) {
+  const tplPath = templatePath.value
+  if (!bpStore.dataPath) {
+    notifyProgress('数据目录未就绪，无法保存')
+    return
+  }
+  if (!tplPath || !bpStore.excelPath) {
+    notifyProgress('请先选择模板与 Excel 数据')
+    return
+  }
+
+  savingProgress.value = true
+  try {
+    // DOCX 模板的字段/图片是直接写进文档的，保存时把编辑器内容写回原文件，
+    // 这样“路径即真相”才能成立；PDF 模板不被改写，无需回写。
+    if (bpStore.templateType === 'docx') {
+      const edited = await docxViewerRef.value?.getDocxArrayBuffer?.() ?? null
+      if (edited) {
+        const editedBytes = new Uint8Array(edited)
+        const unchanged = docxDiskBytes !== null && bytesEqual(editedBytes, docxDiskBytes)
+        if (!unchanged) {
+          const ok = window.confirm(`将把编辑器中的最新内容写回模板原文件：\n${tplPath}\n\n原文件会被覆盖且不可撤销，是否继续？`)
+          if (!ok) {
+            saveDialog.value = false
+            notifyProgress('已取消保存')
+            return
+          }
+          try {
+            await writeFile(tplPath, editedBytes)
+            docxDiskBytes = editedBytes
+            await refreshTemplateMtime()
+          } catch (error) {
+            console.error('回写 DOCX 模板失败:', error)
+            notifyProgress(`模板回写失败（文件可能被占用或只读）：${(error as Error)?.message || '未知错误'}`)
+            return
+          }
+        }
+      }
+    }
+
+    const title = saveTitle.value.trim() || defaultSaveTitle()
+    const projectId = bpStore.currentProjectId || undefined
+
+    const snapshot = await saveWorkspace({
+      dataPath: bpStore.dataPath,
+      id: projectId,
+      title,
+      templateType: bpStore.templateType,
+      templatePath: tplPath,
+      excelPath: bpStore.excelPath,
+      pdfScale: bpStore.pdfScale,
+      iconList: clonePlain(bpStore.iconList),
+      loopBlocks: clonePlain(bpStore.loopBlocks),
+      docxStructure: clonePlain(bpStore.docxStructure),
+      nameParts: clonePlain(nameParts.value),
+    })
+
+    // 记住项目 ID：后续保存继续写入同一个项目，旧版本进入项目历史
+    bpStore.setCurrentProject(snapshot.id, title)
+    // 记下当前材料状态，作为「保存工作进度」是否有新改动的基线
+    savedProgressSignature.value = progressSignature()
+    await refreshProjectRevisionCount()
+    bpStore.bumpWorkspaces()
+    saveDialog.value = false
+    notifyProgress(projectId ? '已保存为该项目的新版本' : '项目已保存')
+
+    if (options.exportAfter) {
+      const exported = await exportWorkspaceJson(clonePlain(snapshot))
+      if (exported) notifyProgress(`已导出到：${exported}`)
+    }
+  } catch (error) {
+    console.error('保存工作进度失败:', error)
+    notifyProgress(`保存失败：${(error as Error)?.message || '未知错误'}`)
+  } finally {
+    savingProgress.value = false
+  }
+}
+
+/** 用历史记录快照重建现场：按路径重读模板/表格，再恢复字段、文件名规则、标注与循环块 */
+async function applyWorkspace(snapshot: WorkspaceSnapshot) {
+  if (!(await exists(snapshot.templatePath))) {
+    notifyProgress('该记录的模板文件已被移动或删除，无法恢复')
+    return
+  }
+  if (!(await exists(snapshot.excelPath))) {
+    notifyProgress('该记录的表格文件已被移动或删除，无法恢复')
+    return
+  }
+
+  // handleReset 会清空项目关联，先记下当前项目名称，供同项目内恢复旧版本时保留
+  const previousProjectId = bpStore.currentProjectId
+  const previousProjectTitle = bpStore.currentProjectTitle
+
+  // 先清空当前会话，避免上一个模板的标注残留
+  handleReset()
+
+  bpStore.pdfScale = snapshot.pdfScale ?? 2
+
+  await loadTemplateFromPath(snapshot.templatePath, { keepAnnotations: true })
+  await loadExcelFromPath(snapshot.excelPath)
+
+  // 标注与循环块不来自文件，直接取自快照
+  bpStore.iconList = snapshot.iconList ?? []
+  bpStore.loopBlocks = snapshot.loopBlocks ?? []
+  nameParts.value = snapshot.nameParts ?? []
+  insertIndex.value = nameParts.value.length
+
+  // 继续编辑 / 再次保存都归入同一个项目；
+  // 同一项目内恢复旧版本时保留项目当前名称，避免被历史版本的名称覆盖
+  const keepTitle = previousProjectId === snapshot.id ? previousProjectTitle : ''
+  bpStore.setCurrentProject(snapshot.id, keepTitle || snapshot.title || snapshot.id)
+  await refreshProjectRevisionCount()
+
+  // Excel 已按磁盘内容重解析：校验材料引用的字段是否仍然存在
+  validateFieldReferences()
+
+  // 刚恢复的版本即当前状态，保存按钮回到「暂无改动」，直到再次编辑
+  savedProgressSignature.value = progressSignature()
+
+  notifyProgress(`已恢复「${snapshot.title}」，可继续编辑`)
+}
+
+/** 从项目历史弹窗恢复指定版本：先确认，再重建现场 */
+async function restoreRevision(snapshot: WorkspaceSnapshot) {
+  const key = revisionKey(snapshot)
+  if (restoringRevisionKey.value) return
+  const ok = window.confirm(
+    `将把项目恢复到 ${formatDateTime(snapshot.savedAt)} 的版本：\n${snapshot.title}\n\n当前未保存的改动会丢失（已保存的版本不受影响），是否继续？`,
+  )
+  if (!ok) return
+
+  restoringRevisionKey.value = key
+  try {
+    await applyWorkspace(snapshot)
+    historyDialog.value = false
+  } finally {
+    restoringRevisionKey.value = ''
+  }
+}
+
+function formatDateTime(iso: string): string {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return iso
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+async function applyPendingRestore() {
+  const snapshot = bpStore.consumeRestore()
+  if (!snapshot) return
+  await applyWorkspace(snapshot)
 }
 
 /* ========= DOCX 循环块（字段/图片拖放由 DocxViewer 直接写入文档，不再走 iconList） ========= */
@@ -1711,6 +2518,106 @@ function deleteLoopBlock() {
 .clear-chip {
   cursor: pointer;
   font-weight: 500;
+}
+
+.confirm-title {
+  font-size: 1rem !important;
+  font-weight: 600;
+}
+
+.confirm-text {
+  font-size: 0.84rem !important;
+  color: rgb(71, 85, 105) !important;
+  line-height: 1.6;
+}
+
+.preview-actions {
+  flex-wrap: wrap;
+}
+
+.project-chip {
+  cursor: pointer;
+  max-width: 190px;
+  font-weight: 500;
+}
+
+.project-chip-name {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-icon-btn {
+  flex: none;
+}
+
+.save-progress-btn {
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 500;
+}
+
+.file-picked-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding-left: 2px;
+  font-size: 0.72rem;
+  color: rgb(71, 85, 105);
+}
+
+.pick-file-btn {
+  justify-content: flex-start;
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 500;
+  font-size: 0.78rem;
+}
+
+.file-meta-row {
+  margin-top: 4px;
+  padding-left: 2px;
+  font-size: 0.68rem;
+  color: rgb(148, 163, 184);
+}
+
+.invalid-field-list {
+  margin: 8px 0 0 0;
+  padding-left: 20px;
+  font-size: 0.8rem;
+  color: rgb(71, 85, 105);
+}
+
+.file-picked-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.save-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.03);
+  font-size: 0.78rem;
+  color: rgb(71, 85, 105);
+}
+
+.save-summary-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.save-summary-row span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ---- sections ---- */
@@ -1905,6 +2812,23 @@ function deleteLoopBlock() {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+/* 透明底的签字 / 印章用棋盘格衬底，便于确认背景是否已去除 */
+.thumb-card--signature,
+.thumb-card--seal {
+  background-color: #fff;
+  background-image:
+    linear-gradient(45deg, #eef2f7 25%, transparent 25%, transparent 75%, #eef2f7 75%),
+    linear-gradient(45deg, #eef2f7 25%, transparent 25%, transparent 75%, #eef2f7 75%);
+  background-size: 12px 12px;
+  background-position: 0 0, 6px 6px;
+}
+
+.thumb-card--signature img,
+.thumb-card--seal img {
+  object-fit: contain;
+  padding: 4px;
 }
 
 .thumb-card:hover {

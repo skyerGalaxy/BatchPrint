@@ -2,12 +2,13 @@
   <div class="pdf-container" ref="pdfContainerRef">
     <div v-for="pageIndex in pdfPages" :key="pageIndex" class="pdf-page-wrapper">
       <canvas
-        :id="`pdf-canvas-${pageIndex}`"
+        :id="pdfCanvasId(pageIndex)"
         class="pdf-page"
       />
       <canvas
-        :id="`overlay-canvas-${pageIndex}`"
+        :id="overlayCanvasId(pageIndex)"
         class="overlay-canvas"
+        :class="{ 'overlay-canvas--readonly': isPreview, 'overlay-canvas--dragging': isDragging }"
         @mousemove="onCanvasMouseMove($event, pageIndex)"
         @mouseleave="onCanvasMouseLeave"
         @mousedown="onCanvasMouseDown($event, pageIndex)"
@@ -26,11 +27,29 @@
     :initial-panel="dialogPanel"
     :initial-icon="dialogIcon"
   />
+
+  <!-- 悬浮在材料上时的信息提示 -->
+  <div
+    v-if="hoverInfo"
+    class="icon-tooltip"
+    :style="{ left: hoverPos.x + 'px', top: hoverPos.y + 'px' }"
+  >
+    <div class="icon-tooltip-head">
+      <span class="icon-tooltip-chip" :style="{ backgroundColor: hoverInfo.color }">
+        {{ hoverInfo.label }}
+      </span>
+      <span v-if="hoverInfo.content" class="icon-tooltip-content">{{ hoverInfo.content }}</span>
+    </div>
+    <div v-if="hoverInfo.conditions" class="icon-tooltip-cond">
+      <span class="icon-tooltip-cond-tag">条件</span>
+      <span class="icon-tooltip-cond-text">{{ hoverInfo.conditions }}</span>
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
 import * as PDFJS from "pdfjs-dist";
-import { ref, onMounted, onUnmounted, watch, nextTick } from "vue";
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from "vue";
 import { useBPStore } from '@/stores/bpstore';
 import LocationDialog from "./LocationDialog.vue";
 import { loadCustomFonts } from '@/utils/fontLoader';
@@ -43,19 +62,32 @@ PDFJS.GlobalWorkerOptions.workerSrc = new URL(
     import.meta.url
   ).toString();
 
-// Props：外部传入 PDF 文件路径
-const props = defineProps({
-  pdfSrc: {
-    type: String,
-    required: true,
-  },
-});
+// Props：外部传入 PDF 文件路径；preview 用于「历史快照」只读预览
+const props = defineProps<{
+  pdfSrc: string
+  /** 只读快照预览：提供当时的材料与缩放；fieldNames/excelContent 用于显示字段真实取值 */
+  preview?: {
+    icons: StoreIcon[]
+    scale: number
+    fieldNames?: string[]
+    excelContent?: any[][]
+  } | null
+}>()
 
 // refs 与状态变量
 let pdfDoc: any = null;
 const pdfPages = ref(0);
-const pdfScale = ref(2); // 控制清晰度
+const pdfScale = ref(props.preview?.scale ?? 2); // 控制清晰度
 const pdfContainerRef = ref<HTMLElement | null>(null);
+
+/** 只读快照预览模式 */
+const isPreview = computed(() => !!props.preview);
+
+// 每个实例使用独立 id 前缀：历史快照预览会与主预览同时挂载，
+// 若沿用固定 id，document.getElementById 会取到另一个实例的 canvas。
+const canvasUid = `pdfview-${Math.random().toString(36).slice(2, 8)}`;
+const pdfCanvasId = (page: number) => `${canvasUid}-pdf-${page}`;
+const overlayCanvasId = (page: number) => `${canvasUid}-overlay-${page}`;
 
 const indexOfPage = ref(1);
 const pointer_x = ref(0);
@@ -86,6 +118,23 @@ const copiedIcon = ref<StoreIcon | null>(null);
 const lastMouseCoords = ref({ x: 0, y: 0 });
 const lastMousePageIndex = ref(1);
 
+// ---- 命中判定 / 重叠循环选择 ----
+// 命中容差：在真实可见边界外再放宽一点，保证小图标也好点中
+const HIT_TOLERANCE = 5;
+// 区分「点击」与「拖动」的位移阈值，超过则视为拖动
+const DRAG_MOVE_THRESHOLD = 3;
+// 判定「同一位置重复点击」的距离阈值，用于重叠循环选择
+const CLICK_SAME_POINT = 4;
+let dragStartPoint: { x: number; y: number } | null = null;
+let dragMoved = false;
+// 上一次点击的位置与所选图标：只有原地再次点击才切到下一层
+let lastClickPoint: { x: number; y: number } | null = null;
+let lastClickedIconId: number | null = null;
+
+// ---- 悬浮提示：鼠标停靠在材料上时显示类型/字段/条件 ----
+const hoveredIcon = ref<StoreIcon | null>(null);
+const hoverPos = ref({ x: 0, y: 0 });
+
 const BTN_R = 10;
 const BTN_PAD = 5;
 const HIT_PAD = 4;
@@ -109,7 +158,7 @@ const loadFile = (url: string) => {
 // 渲染每一页
 const renderPage = (num: number) => {
   pdfDoc.getPage(num).then((page: any) => {
-    const canvas: HTMLCanvasElement | null = document.getElementById(`pdf-canvas-${num}`) as HTMLCanvasElement;
+    const canvas: HTMLCanvasElement | null = document.getElementById(pdfCanvasId(num)) as HTMLCanvasElement;
     if (!canvas) return;
 
     const ctx = canvas.getContext("2d")!;
@@ -138,7 +187,7 @@ const renderPage = (num: number) => {
     });
 
     // 初始化 overlay canvas
-    const overlayCanvas: HTMLCanvasElement | null = document.getElementById(`overlay-canvas-${num}`) as HTMLCanvasElement;
+    const overlayCanvas: HTMLCanvasElement | null = document.getElementById(overlayCanvasId(num)) as HTMLCanvasElement;
     if (overlayCanvas) {
       overlayCanvas.width = viewport.width;
       overlayCanvas.height = viewport.height;
@@ -171,6 +220,7 @@ function onCanvasDragOver(e: DragEvent) {
 }
 
 function onCanvasDrop(e: DragEvent, pageIndex: number) {
+  if (isPreview.value) return;
   const raw = e.dataTransfer?.getData('application/x-batchprint-option');
   if (!raw) return;
 
@@ -180,7 +230,7 @@ function onCanvasDrop(e: DragEvent, pageIndex: number) {
     // 同类型材料沿用上次确认的样式（载荷仅提供身份字段；文本预设自带样式）
     const kind = (payload.panel || 'table') as MaterialKind;
     const option = bpStore.instantiateOption(kind, payload.option);
-    const canvas = document.getElementById(`overlay-canvas-${pageIndex}`) as HTMLCanvasElement | null;
+    const canvas = document.getElementById(overlayCanvasId(pageIndex)) as HTMLCanvasElement | null;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
     const x = (e.clientX - rect.left) * (canvas.width / rect.width);
@@ -210,6 +260,10 @@ function onCanvasDrop(e: DragEvent, pageIndex: number) {
 
 
 const loadIconsFromStore = () => {
+  if (isPreview.value) {
+    icons.value = (props.preview?.icons ?? []) as StoreIcon[];
+    return;
+  }
   if (bpStore.iconList && bpStore.iconList.length > 0) {
     icons.value = bpStore.iconList as StoreIcon[];
   } else {
@@ -223,7 +277,7 @@ function getIconSize(icon: StoreIcon) {
 
 // 获取鼠标在 canvas 上的坐标（考虑样式缩放）
 function getCanvasCoordinates(e: MouseEvent, pageIndex: number) {
-  const canvas = document.getElementById(`overlay-canvas-${pageIndex}`) as HTMLCanvasElement | null;
+  const canvas = document.getElementById(overlayCanvasId(pageIndex)) as HTMLCanvasElement | null;
   if (!canvas) return { x: 0, y: 0 };
 
   const rect = canvas.getBoundingClientRect();
@@ -232,15 +286,26 @@ function getCanvasCoordinates(e: MouseEvent, pageIndex: number) {
   return { x, y };
 }
 
-// 检查鼠标是否在某个 icon 内
+// 检查鼠标是否在某个 icon 内：用真实可见边界（含旋转）判定，而非 size 正方形
 function isPointInIcon(point: { x: number; y: number }, icon: StoreIcon) {
-  const size = getIconSize(icon);
-  return (
-    point.x >= icon.pointer.clientX - size / 2 &&
-    point.x <= icon.pointer.clientX + size / 2 &&
-    point.y >= icon.pointer.clientY - size / 2 &&
-    point.y <= icon.pointer.clientY + size / 2
-  );
+  const { halfW, halfH } = getIconBounds(icon);
+  const dx = point.x - icon.pointer.clientX;
+  const dy = point.y - icon.pointer.clientY;
+  // 反向旋转到图标本地坐标（与 hitCornerButton / 绘制时的 rotate 约定一致）
+  const rot = -(icon.rotation ?? 0) * Math.PI / 180;
+  const lx = dx * Math.cos(rot) - dy * Math.sin(rot);
+  const ly = dx * Math.sin(rot) + dy * Math.cos(rot);
+  return Math.abs(lx) <= halfW + HIT_TOLERANCE && Math.abs(ly) <= halfH + HIT_TOLERANCE;
+}
+
+// 返回该点命中的所有 icon，最上层优先（与绘制顺序相反），用于选择与重叠循环
+function hitTestIcons(point: { x: number; y: number }, pageIndex: number): StoreIcon[] {
+  const list = icons.value.filter(icon => icon.pageIndex === pageIndex);
+  const hits: StoreIcon[] = [];
+  for (let i = list.length - 1; i >= 0; i -= 1) {
+    if (isPointInIcon(point, list[i])) hits.push(list[i]);
+  }
+  return hits;
 }
 
 function hitCornerButton(point: { x: number; y: number }, icon: StoreIcon): 'delete' | 'rotate' | 'resize' | null {
@@ -285,9 +350,24 @@ function scheduleResizeSave(icon: StoreIcon) {
 }
 
 function onCanvasMouseMove(e: MouseEvent, pageIndex: number) {
+  if (isPreview.value) return;
   const coords = getCanvasCoordinates(e, pageIndex);
   lastMouseCoords.value = coords;
   lastMousePageIndex.value = pageIndex;
+
+  // 未处于拖动/缩放/旋转时，更新悬浮提示（命中用同一套真实边界判定）
+  if (!isDragging.value && !isResizing.value && !isRotating.value) {
+    const top = hitTestIcons(coords, pageIndex)[0] ?? null;
+    hoveredIcon.value = top;
+    if (top) {
+      hoverPos.value = {
+        x: Math.max(8, Math.min(e.clientX + 16, window.innerWidth - 336)),
+        y: Math.max(8, Math.min(e.clientY + 18, window.innerHeight - 96)),
+      };
+    }
+  } else {
+    hoveredIcon.value = null;
+  }
 
   if (isRotating.value && rotateIcon.value) {
     const dx = coords.x - rotateIcon.value.pointer.clientX;
@@ -315,6 +395,10 @@ function onCanvasMouseMove(e: MouseEvent, pageIndex: number) {
   }
 
   if (isDragging.value && selectedIcon.value) {
+    if (dragStartPoint) {
+      const moved = Math.hypot(coords.x - dragStartPoint.x, coords.y - dragStartPoint.y);
+      if (moved > DRAG_MOVE_THRESHOLD) dragMoved = true;
+    }
     selectedIcon.value.pointer.clientX = coords.x - dragOffset.value.x;
     selectedIcon.value.pointer.clientY = coords.y - dragOffset.value.y;
     redrawIcons(pageIndex);
@@ -324,11 +408,16 @@ function onCanvasMouseMove(e: MouseEvent, pageIndex: number) {
 
 function onCanvasMouseLeave() {
   // selection persists, no auto-deselect
+  hoveredIcon.value = null;
 }
 
 function onCanvasMouseDown(e: MouseEvent, pageIndex: number) {
+  if (isPreview.value) return;
   const coords = getCanvasCoordinates(e, pageIndex);
-  const pageIcons = icons.value.filter(icon => icon.pageIndex === pageIndex);
+  dragStartPoint = { x: coords.x, y: coords.y };
+  dragMoved = false;
+  // 开始交互时先收起悬浮提示，避免与拖动/操作叠加
+  hoveredIcon.value = null;
 
   const sel = selectedIcon.value;
   if (sel && sel.pageIndex === pageIndex) {
@@ -363,17 +452,21 @@ function onCanvasMouseDown(e: MouseEvent, pageIndex: number) {
     }
   }
 
-  for (const icon of pageIcons) {
-    if (isPointInIcon(coords, icon)) {
-      selectedIcon.value = icon;
-      isDragging.value = true;
-      dragOffset.value = { x: coords.x - icon.pointer.clientX, y: coords.y - icon.pointer.clientY };
-      redrawIcons(pageIndex);
-      return;
-    }
+  // 取最上层（视觉最前面）的命中项
+  const hits = hitTestIcons(coords, pageIndex);
+  if (hits.length > 0) {
+    const target = hits[0];
+    selectedIcon.value = target;
+    isDragging.value = true;
+    dragOffset.value = { x: coords.x - target.pointer.clientX, y: coords.y - target.pointer.clientY };
+    redrawIcons(pageIndex);
+    return;
   }
 
+  // 空点：取消选择，并清掉循环点击的状态
   selectedIcon.value = null;
+  lastClickPoint = null;
+  lastClickedIconId = null;
   redrawIcons(pageIndex);
 }
 
@@ -388,24 +481,46 @@ function onCanvasMouseUp() {
     const kind = iconMaterialKind(icon.option);
     void bpStore.saveMaterialStyle(kind, { size: icon.size });
   }
+
+  // 未发生位移的点击 = 选择操作：
+  // 首次点击选中上层；在「同一位置」再次点击才切到下一层（重叠循环）
+  const isClick = isDragging.value && !dragMoved && dragStartPoint !== null;
+  if (isClick && selectedIcon.value) {
+    const point = dragStartPoint!;
+    const samePoint = lastClickPoint !== null
+      && Math.hypot(point.x - lastClickPoint.x, point.y - lastClickPoint.y) <= CLICK_SAME_POINT;
+    const hits = hitTestIcons(point, selectedIcon.value.pageIndex);
+    const idx = hits.indexOf(selectedIcon.value);
+    if (samePoint && lastClickedIconId === selectedIcon.value.id && idx >= 0 && hits.length > 1) {
+      selectedIcon.value = hits[(idx + 1) % hits.length];
+      redrawIcons(selectedIcon.value.pageIndex);
+    }
+    lastClickPoint = { x: point.x, y: point.y };
+    lastClickedIconId = selectedIcon.value.id;
+  } else {
+    // 拖动 / 缩放 / 旋转 / 空点：结束一轮点击，重置循环状态
+    lastClickPoint = null;
+    lastClickedIconId = null;
+  }
+
   isDragging.value = false;
   isResizing.value = false;
   isRotating.value = false;
   resizeIcon.value = null;
   rotateIcon.value = null;
+  dragStartPoint = null;
+  dragMoved = false;
 }
 
 // 右键单击 icon 时打开设置弹窗
 function onCanvasContextMenu(e: MouseEvent, pageIndex: number) {
+  if (isPreview.value) return;
   const coords = getCanvasCoordinates(e, pageIndex);
-  const pageIcons = icons.value.filter(icon => icon.pageIndex === pageIndex);
-  for (const icon of pageIcons) {
-    if (isPointInIcon(coords, icon)) {
-      selectedIcon.value = icon;
-      redrawIcons(pageIndex);
-      openLocationDialog(icon);
-      return;
-    }
+  const hits = hitTestIcons(coords, pageIndex);
+  if (hits.length > 0) {
+    selectedIcon.value = hits[0];
+    redrawIcons(pageIndex);
+    openLocationDialog(hits[0]);
   }
 }
 
@@ -456,11 +571,12 @@ function deleteIcon(icon: StoreIcon) {
     redrawIcons(icon.pageIndex);
   }
   if (selectedIcon.value === icon) selectedIcon.value = null;
+  if (hoveredIcon.value === icon) hoveredIcon.value = null;
 }
 
 // 重新绘制 overlay canvas 上的 icon
 function redrawIcons(pageIndex: number) {
-  const canvas = document.getElementById(`overlay-canvas-${pageIndex}`) as HTMLCanvasElement | null;
+  const canvas = document.getElementById(overlayCanvasId(pageIndex)) as HTMLCanvasElement | null;
   if (!canvas) return;
 
   const ctx = canvas.getContext("2d");
@@ -470,8 +586,12 @@ function redrawIcons(pageIndex: number) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   const pageIcons = icons.value.filter(icon => icon.pageIndex === pageIndex);
+  // 先画未选中的，最后画选中项：保证选中框与角按钮始终在最上层，不被其它图标盖住
   for (const icon of pageIcons) {
-    drawIcon(ctx, icon, icon === selectedIcon.value);
+    if (icon !== selectedIcon.value) drawIcon(ctx, icon, false);
+  }
+  if (selectedIcon.value && pageIcons.includes(selectedIcon.value)) {
+    drawIcon(ctx, selectedIcon.value, true);
   }
 }
 
@@ -483,7 +603,17 @@ function redrawAllPages() {
 
 // 辅助函数：获取字段值
 function getFieldValue(fieldName: string): string {
-  if (!fieldName || !bpStore.fieldNames || !bpStore.excelContent?.length) {
+  if (!fieldName) return '';
+  // 只读快照预览：优先用外部传入的表格显示真实取值
+  if (isPreview.value) {
+    const fieldNames = props.preview?.fieldNames;
+    const content = props.preview?.excelContent;
+    if (!fieldNames || !content?.length) return `{${fieldName}}`;
+    const columnIndex = fieldNames.indexOf(fieldName);
+    if (columnIndex === -1) return `{${fieldName}}`;
+    return String(content[0][columnIndex] ?? '');
+  }
+  if (!bpStore.fieldNames || !bpStore.excelContent?.length) {
     return '';
   }
   const columnIndex = bpStore.fieldNames.indexOf(fieldName);
@@ -593,6 +723,64 @@ function checkIconConditions(icon: StoreIcon): boolean {
 
   return checkConditions(icon.conditions, icon.matchMode);
 }
+
+// 把条件表达式整理成可读文本，用于悬浮提示
+function describeConditions(icon: StoreIcon): string {
+  const fmt = (c: IconCondition) => {
+    const field = c.field || '字段';
+    if (c.op === '为空' || c.op === '不为空') return `${field} ${c.op}`;
+    return `${field} ${c.op} ${c.value ?? ''}`.trim();
+  };
+  if (icon.logicType === 'advanced' && icon.groups?.length) {
+    const connectors = icon.groupConnectors || [];
+    return icon.groups
+      .map((g, i) => {
+        const inner = g.conditions.map(fmt).join(g.matchMode === '任一' ? ' 或 ' : ' 且 ');
+        const wrapped = g.conditions.length > 1 ? `(${inner})` : inner;
+        return i === 0 ? wrapped : `${connectors[i - 1] ?? '且'} ${wrapped}`;
+      })
+      .join(' ');
+  }
+  const mode = icon.matchMode === '任一' ? ' 或 ' : ' 且 ';
+  return (icon.conditions || []).map(fmt).join(mode);
+}
+
+// 悬浮提示的展示信息：常规只显示类型/字段，条件字段额外显示条件
+const hoverInfo = computed(() => {
+  const icon = hoveredIcon.value;
+  if (!icon) return null;
+  let label = '材料';
+  let color = '#64748b';
+  let content = '';
+  switch (icon.option.type) {
+    case 'field':
+      label = '字段';
+      color = '#2563eb';
+      content = icon.option.fieldName || '未命名';
+      break;
+    case 'text':
+      label = '文本';
+      color = '#db2777';
+      content = icon.option.text || '';
+      break;
+    case 'icon':
+      label = '图标';
+      color = '#7c3aed';
+      content = icon.option.icon || '';
+      break;
+    case 'image':
+      if (icon.option.imageKind === 'seal') {
+        label = '印章';
+        color = '#dc2626';
+      } else {
+        label = '签字';
+        color = '#059669';
+      }
+      break;
+  }
+  const conditions = icon.mode === 'conditional' ? describeConditions(icon) : '';
+  return { label, color, content, conditions };
+});
 
 function getIconBounds(icon: StoreIcon): { halfW: number; halfH: number } {
   const s = getIconSize(icon);
@@ -766,6 +954,15 @@ function drawIcon(ctx: CanvasRenderingContext2D, icon: StoreIcon, isSelected: bo
 
 // 初始化
 onMounted(async () => {
+  if (isPreview.value) {
+    // 只读预览：加载字体/扰动配置用于绘制文字，但不写入 store，也不接管键盘
+    await loadCustomFonts(bpStore.dataPath);
+    await loadJitterConfig();
+    loadFile(props.pdfSrc);
+    loadIconsFromStore();
+    return;
+  }
+
   document.addEventListener('keydown', handleKeyDown);
   // 先加载自定义字体与扰动配置
   await loadCustomFonts(bpStore.dataPath);
@@ -778,6 +975,7 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  if (isPreview.value) return;
   document.removeEventListener('keydown', handleKeyDown);
 });
 
@@ -797,6 +995,19 @@ watch(
 watch(
   () => bpStore.iconList,
   () => {
+    if (isPreview.value) return;
+    loadIconsFromStore();
+    redrawAllPages();
+  },
+  { deep: true }
+);
+
+// 只读预览：快照内容/缩放变化时同步重绘
+watch(
+  () => props.preview,
+  (preview) => {
+    if (!preview) return;
+    pdfScale.value = preview.scale || 2;
     loadIconsFromStore();
     redrawAllPages();
   },
@@ -834,10 +1045,93 @@ watch(
   position: absolute;
   top: 0;
   left: 0;
-  cursor: grab;
+  cursor: default;
 }
 
-.overlay-canvas:active {
+/* 仅在真正拖动材料时显示手形 */
+.overlay-canvas--dragging {
   cursor: grabbing;
+}
+
+.overlay-canvas--readonly {
+  pointer-events: none;
+  cursor: default;
+}
+
+/* ---- 悬浮提示 ---- */
+.icon-tooltip {
+  position: fixed;
+  z-index: 3000;
+  pointer-events: none;
+  max-width: 320px;
+  padding: 8px 11px;
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.94);
+  color: #f8fafc;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.28);
+  backdrop-filter: blur(6px);
+  font-size: 12px;
+  line-height: 1.5;
+  animation: icon-tooltip-in 0.12s ease-out;
+}
+
+.icon-tooltip-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.icon-tooltip-chip {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.6;
+}
+
+.icon-tooltip-content {
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.icon-tooltip-cond {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.14);
+  color: rgba(226, 232, 240, 0.92);
+}
+
+.icon-tooltip-cond-tag {
+  flex: none;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: rgba(251, 191, 36, 0.22);
+  color: #fcd34d;
+  font-size: 10px;
+  line-height: 1.7;
+}
+
+.icon-tooltip-cond-text {
+  word-break: break-word;
+}
+
+@keyframes icon-tooltip-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 </style>

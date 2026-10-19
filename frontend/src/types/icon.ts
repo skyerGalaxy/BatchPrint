@@ -39,6 +39,8 @@ export interface IconOption {
   cornerRadius?: number
   /** 是否锁定纵横比（印章）：false 时拉伸填满正方形区域，缺省视为 true */
   keepRatio?: boolean
+  /** 逐份自然随机 0-100：每份文件的图片有细微角度/位置/大小/浓度差异（仅导出 PDF 生效） */
+  liveJitter?: number
 }
 
 export interface StoreIcon {
